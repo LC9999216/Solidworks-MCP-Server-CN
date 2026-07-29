@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "solidworks-mcp"
 version = "0.2.0"
-description = "MCP server bridging Claude with SolidWorks CAD via the COM API"
+description = "MCP server bridging AI clients with SolidWorks CAD via the COM API"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Joseph Robertson" }]
