@@ -1,0 +1,4 @@
+mcp>=1.26.0
+pywin32>=311
+Pillow>=10.0          # face-label overlays in look_at_model screenshots
+watchdog>=6.0.0       # dev_server.py hot-reload only (optional at runtime)

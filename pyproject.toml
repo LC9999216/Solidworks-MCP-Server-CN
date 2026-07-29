@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "solidworks-mcp"
+version = "0.2.0"
+description = "MCP server bridging Claude with SolidWorks CAD via the COM API"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Joseph Robertson" }]
+requires-python = ">=3.10"
+keywords = ["mcp", "solidworks", "cad", "claude", "model-context-protocol"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Computer Aided Design (CAD)",
+]
+dependencies = [
+    "mcp>=1.26.0",
+    "pywin32>=311",
+    "Pillow>=10.0",  # face-label overlays in look_at_model screenshots
+]
+
+[project.optional-dependencies]
+dev = [
+    "watchdog>=6.0.0",  # dev_server.py hot-reload
+]
+
+[project.scripts]
+solidworks-mcp = "server:run"
+
+[project.urls]
+Homepage = "https://github.com/HarrierPigeon/Solidworks-MCP-Server"
+Issues = "https://github.com/HarrierPigeon/Solidworks-MCP-Server/issues"
+
+[tool.setuptools]
+# `server` as a top-level module keeps `from server import SolidWorksMCPServer`
+# working for downstream consumers using an editable install.
+packages = ["solidworks"]
+py-modules = ["server"]

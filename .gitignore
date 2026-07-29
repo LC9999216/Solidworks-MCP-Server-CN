@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Runtime output
+*.log
+workspace/
+
+# SolidWorks files
+*.SLDPRT
+*.SLDASM
+*.SLDDRW
+~$*.SLDPRT
+~$*.SLDASM
