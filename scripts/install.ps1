@@ -1,12 +1,17 @@
+param(
+    [ValidateSet('Auto', 'Claude', 'Codex', 'Both')]
+    [string]$Client = 'Auto'
+)
+
 # SolidWorks MCP Server — Windows installer
 #
 # Installs everything needed to use the SolidWorks MCP server with Claude
-# Desktop, with no prerequisites (no Python, no git required):
+# Desktop and/or Codex/ChatGPT desktop, with no Python or git prerequisite:
 #
 #   1. Installs uv (a fast Python manager) if it isn't already installed
 #   2. Downloads the latest release of this project from GitHub
 #   3. Creates an isolated Python environment and installs dependencies
-#   4. Registers the server in Claude Desktop's config (backing it up first)
+#   4. Registers the server with detected or explicitly selected clients
 #
 # Usage (paste into PowerShell):
 #   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/HarrierPigeon/Solidworks-MCP-Server/main/scripts/install.ps1 | iex"
@@ -25,10 +30,65 @@ $VenvDir    = Join-Path $InstallDir 'venv'
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "    $msg" -ForegroundColor Green }
+function Write-Note($msg) { Write-Host "    $msg" -ForegroundColor Yellow }
+
+function Find-ClaudeConfigDir {
+    $classic = Join-Path $env:APPDATA 'Claude'
+    if (Test-Path $classic) { return $classic }
+
+    $packagesDir = Join-Path $env:LOCALAPPDATA 'Packages'
+    if (Test-Path $packagesDir) {
+        $msix = Get-ChildItem $packagesDir -Directory -Filter 'Claude*' -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+        if ($msix) {
+            $candidate = Join-Path $msix.FullName 'LocalCache\Roaming\Claude'
+            if (Test-Path $candidate) { return $candidate }
+        }
+    }
+    return $null
+}
+
+function Test-ClaudeInstalled {
+    if (Find-ClaudeConfigDir) { return $true }
+    return Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\Claude\Claude.exe')
+}
+
+function Test-CodexInstalled {
+    if (Get-Command codex -ErrorAction SilentlyContinue) { return $true }
+
+    # The ChatGPT desktop app is a Codex host and shares Codex MCP settings.
+    $packagesDir = Join-Path $env:LOCALAPPDATA 'Packages'
+    if (Test-Path $packagesDir) {
+        $chatGptPackage = Get-ChildItem $packagesDir -Directory -ErrorAction SilentlyContinue |
+                          Where-Object { $_.Name -match 'OpenAI.*ChatGPT|ChatGPT.*OpenAI' } |
+                          Select-Object -First 1
+        if ($chatGptPackage) { return $true }
+    }
+    return Test-Path (Join-Path $env:LOCALAPPDATA 'ChatGPT')
+}
 
 Write-Host ''
 Write-Host 'SolidWorks MCP Server installer' -ForegroundColor White
 Write-Host '-------------------------------'
+
+$installClaude = $Client -in @('Claude', 'Both')
+$installCodex = $Client -in @('Codex', 'Both')
+if ($Client -eq 'Auto') {
+    $installClaude = Test-ClaudeInstalled
+    $installCodex = Test-CodexInstalled
+    $detected = @()
+    if ($installClaude) { $detected += 'Claude Desktop' }
+    if ($installCodex) { $detected += 'Codex / ChatGPT desktop' }
+    if ($detected.Count) {
+        Write-Ok "Auto-detected: $($detected -join ', ')"
+    } else {
+        Write-Note 'No supported client was confidently detected.'
+        Write-Note 'The server will be installed without changing client configuration.'
+        Write-Note 'Re-run with -Client Claude, Codex, or Both to select explicitly.'
+    }
+} else {
+    Write-Ok "Client selection: $Client"
+}
 
 # --- 1. Ensure uv ----------------------------------------------------------
 Write-Step 'Checking for uv...'
@@ -108,54 +168,93 @@ if ($LASTEXITCODE -ne 0) { throw 'Failed to install Python dependencies.' }
 if ($LASTEXITCODE -ne 0) { throw 'Environment check failed — dependencies did not import cleanly.' }
 Write-Ok 'Python environment ready.'
 
-# --- 4. Register with Claude Desktop --------------------------------------
-Write-Step 'Registering with Claude Desktop...'
+# --- 4. Register with selected clients ------------------------------------
+$serverPath = Join-Path $AppDir 'server.py'
 
-# Classic install path, then Microsoft Store (MSIX) install path
-$cfgDir = Join-Path $env:APPDATA 'Claude'
-if (-not (Test-Path $cfgDir)) {
-    $msix = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Packages') -Directory -Filter 'Claude*' -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-    if ($msix) {
-        $candidate = Join-Path $msix.FullName 'LocalCache\Roaming\Claude'
-        if (Test-Path $candidate) { $cfgDir = $candidate }
+if ($installClaude) {
+    Write-Step 'Registering with Claude Desktop...'
+    $cfgDir = Find-ClaudeConfigDir
+    if (-not $cfgDir) {
+        # Explicit selection may create the conventional location. Auto mode
+        # reaches here only after finding credible evidence of an installation.
+        $cfgDir = Join-Path $env:APPDATA 'Claude'
+        New-Item -ItemType Directory -Force $cfgDir | Out-Null
+        Write-Note "Claude config folder was not found; created: $cfgDir"
+    }
+
+    $cfgPath = Join-Path $cfgDir 'claude_desktop_config.json'
+    $config = $null
+    if (Test-Path $cfgPath) {
+        Copy-Item $cfgPath "$cfgPath.backup" -Force
+        Write-Ok 'Backed up existing config to claude_desktop_config.json.backup'
+        $raw = Get-Content $cfgPath -Raw
+        if ($raw -and $raw.Trim()) { $config = $raw | ConvertFrom-Json }
+    }
+    if (-not $config) { $config = [pscustomobject]@{} }
+    if (-not ($config.PSObject.Properties.Name -contains 'mcpServers') -or -not $config.mcpServers) {
+        $config | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+
+    $serverEntry = [pscustomobject]@{
+        command = $venvPython
+        args    = @($serverPath)
+    }
+    $config.mcpServers | Add-Member -NotePropertyName solidworks -NotePropertyValue $serverEntry -Force
+
+    # BOM-less UTF-8: PS 5.1's Out-File -Encoding utf8 writes a BOM, which
+    # some JSON parsers reject.
+    [IO.File]::WriteAllText($cfgPath, ($config | ConvertTo-Json -Depth 20),
+                            (New-Object System.Text.UTF8Encoding $false))
+    Write-Ok "Updated: $cfgPath"
+}
+
+if ($installCodex) {
+    Write-Step 'Registering with Codex / ChatGPT desktop...'
+    $codexCmd = Get-Command codex -ErrorAction SilentlyContinue
+    if ($codexCmd) {
+        # `codex mcp add` refuses duplicate names, so replace this entry on
+        # reruns before adding its current installed paths.
+        $codexConfig = Join-Path $env:USERPROFILE '.codex\config.toml'
+        $codexBackup = "$codexConfig.solidworks-mcp.backup"
+        if (Test-Path $codexConfig) {
+            Copy-Item $codexConfig $codexBackup -Force
+            Write-Ok 'Backed up existing Codex config to config.toml.solidworks-mcp.backup'
+        }
+        & $codexCmd.Source mcp get solidworks *> $null
+        if ($LASTEXITCODE -eq 0) {
+            & $codexCmd.Source mcp remove solidworks
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to replace the existing Codex MCP entry.' }
+        }
+        & $codexCmd.Source mcp add solidworks -- $venvPython $serverPath
+        if ($LASTEXITCODE -ne 0) {
+            if (Test-Path $codexBackup) {
+                Copy-Item $codexBackup $codexConfig -Force
+                Write-Note 'Registration failed; restored the previous Codex configuration.'
+            }
+            throw 'Failed to register the server with Codex.'
+        }
+        Write-Ok 'Registered Codex MCP server: solidworks'
+    } else {
+        Write-Note 'Codex CLI was not found on PATH, so automatic registration was skipped.'
+        Write-Note 'In ChatGPT desktop, use Settings > MCP servers > Add server > STDIO.'
+        Write-Note "Command: $venvPython"
+        Write-Note "Arguments: $serverPath"
     }
 }
-if (-not (Test-Path $cfgDir)) {
-    New-Item -ItemType Directory -Force $cfgDir | Out-Null
-    Write-Host '    NOTE: Claude Desktop config folder was not found — created one.' -ForegroundColor Yellow
-    Write-Host '    If Claude Desktop is not installed yet, get it from https://claude.ai/download' -ForegroundColor Yellow
-}
-
-$cfgPath = Join-Path $cfgDir 'claude_desktop_config.json'
-$config = $null
-if (Test-Path $cfgPath) {
-    Copy-Item $cfgPath "$cfgPath.backup" -Force
-    Write-Ok "Backed up existing config to claude_desktop_config.json.backup"
-    $raw = Get-Content $cfgPath -Raw
-    if ($raw -and $raw.Trim()) { $config = $raw | ConvertFrom-Json }
-}
-if (-not $config) { $config = [pscustomobject]@{} }
-if (-not ($config.PSObject.Properties.Name -contains 'mcpServers') -or -not $config.mcpServers) {
-    $config | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{}) -Force
-}
-
-$serverEntry = [pscustomobject]@{
-    command = $venvPython
-    args    = @((Join-Path $AppDir 'server.py'))
-}
-$config.mcpServers | Add-Member -NotePropertyName solidworks -NotePropertyValue $serverEntry -Force
-
-# BOM-less UTF-8: PS 5.1's Out-File -Encoding utf8 writes a BOM, which some
-# JSON parsers reject
-[IO.File]::WriteAllText($cfgPath, ($config | ConvertTo-Json -Depth 20),
-                        (New-Object System.Text.UTF8Encoding $false))
-Write-Ok "Updated: $cfgPath"
 
 # --- Done ------------------------------------------------------------------
 Write-Host ''
 Write-Host 'Done! Final steps:' -ForegroundColor White
-Write-Host '  1. Restart Claude Desktop completely (File -> Exit, then reopen).'
-Write-Host '  2. Make sure SolidWorks is installed. Starting it before Claude helps.'
-Write-Host '  3. Ask Claude: "Create a 50mm cube in SolidWorks".'
+$step = 1
+if ($installClaude) {
+    Write-Host "  $step. Restart Claude Desktop completely (File -> Exit, then reopen)."
+    $step++
+}
+if ($installCodex) {
+    Write-Host "  $step. Restart ChatGPT desktop, Codex CLI, or the Codex IDE extension."
+    $step++
+}
+Write-Host "  $step. Make sure SolidWorks is installed. Starting it before your AI client helps."
+$step++
+Write-Host "  $step. Ask: `"Create a 50mm cube in SolidWorks`"."
 Write-Host ''

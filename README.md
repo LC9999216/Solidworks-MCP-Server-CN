@@ -1,10 +1,10 @@
 # SolidWorks MCP Server
 
-Control SolidWorks with plain language. This [Model Context Protocol](https://modelcontextprotocol.io/) server connects Claude to SolidWorks, so you can describe a part — *"a 60mm mounting bracket with four M5 clearance holes and 3mm fillets"* — and watch it get built, feature by feature, in a real SolidWorks session.
+Control SolidWorks with plain language. This [Model Context Protocol](https://modelcontextprotocol.io/) server connects AI clients such as Claude and Codex to SolidWorks, so you can describe a part — *"a 60mm mounting bracket with four M5 clearance holes and 3mm fillets"* — and watch it get built, feature by feature, in a real SolidWorks session.
 
-This is, as far as I can tell, the most complete MCP server for SolidWorks available, and will be expanding as time allows.
+This is, as far as I can tell, the most complete MCP server for SolidWorks available, and I will be expanding as time allows.
 
-At present, Claude gets **89 tools** <!-- I've had to update this like 8 times --> covering sketching, solid features, assemblies with mates, configurations, equations, and — critically — *feedback*: it can query faces and edges, check mass properties, detect interference, and take labeled screenshots of the model to see what it's actually building.
+At present, the connected AI client gets **89 tools** <!-- I've had to update this like 8 times --> covering sketching, solid features, assemblies with mates, configurations, equations, and — critically — *feedback*: it can query faces and edges, check mass properties, detect interference, and take labeled screenshots of the model to see what it's actually building.
 
 ## What it can do
 
@@ -24,7 +24,7 @@ At present, Claude gets **89 tools** <!-- I've had to update this like 8 times -
 
 - **Windows** (SolidWorks only runs on Windows)
 - **SolidWorks 2022 or later**, installed and activated (tested on SolidWorks 2025)
-- **[Claude Desktop](https://claude.ai/download)** (or any MCP-capable AI client)
+- **Claude Desktop, Codex, or the ChatGPT desktop app** (other local MCP clients may also work with manual configuration)
 
 That's it — the installer below takes care of Python and everything else.
 
@@ -38,13 +38,23 @@ Open **PowerShell** (press `Win`, type "PowerShell", press Enter) and paste:
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/HarrierPigeon/Solidworks-MCP-Server/main/scripts/install.ps1 | iex"
 ```
 
-The script installs [uv](https://docs.astral.sh/uv/) (which provides Python — you don't need Python installed), downloads the latest release, sets up an isolated environment under `%LOCALAPPDATA%\SolidWorksMCP`, and registers the server in Claude Desktop's config (backing up your existing config first).
+The script installs [uv](https://docs.astral.sh/uv/) (which provides Python — you don't need Python installed), downloads the latest release, and sets up an isolated environment under `%LOCALAPPDATA%\SolidWorksMCP`. It auto-detects Claude Desktop and Codex/ChatGPT desktop and registers the server with each confidently detected client.
 
-Then **restart Claude Desktop completely** (File → Exit, then reopen) and ask Claude to *"create a 50mm cube in SolidWorks"*.
+To choose explicitly, download the script and run one of:
+
+```powershell
+.\install.ps1 -Client Claude
+.\install.ps1 -Client Codex
+.\install.ps1 -Client Both
+```
+
+Valid selections are `Auto` (the default), `Claude`, `Codex`, and `Both`. “Codex” covers the local Codex clients and ChatGPT desktop MCP configuration; it does not enable the hosted ChatGPT web app.
+
+Then restart the configured client completely and ask it to *"create a 50mm cube in SolidWorks"*.
 
 **To update later:** re-run the same one-liner.
 
-**To uninstall:** delete `%LOCALAPPDATA%\SolidWorksMCP` and remove the `"solidworks"` entry from `%APPDATA%\Claude\claude_desktop_config.json`.
+**To uninstall:** delete `%LOCALAPPDATA%\SolidWorksMCP`, remove the `"solidworks"` entry from `%APPDATA%\Claude\claude_desktop_config.json` if configured, and run `codex mcp remove solidworks` if configured for Codex.
 
 ### Manual install (for developers)
 
@@ -63,7 +73,7 @@ pip install -r requirements.txt
 
 > Tip: clone somewhere that isn't a network drive.
 
-Then register the server in `%APPDATA%\Claude\claude_desktop_config.json` (Claude Desktop → Settings → Developer → Edit Config):
+For Claude Desktop, register the server in `%APPDATA%\Claude\claude_desktop_config.json` (Claude Desktop → Settings → Developer → Edit Config):
 
 ```json
 {
@@ -76,7 +86,13 @@ Then register the server in `%APPDATA%\Claude\claude_desktop_config.json` (Claud
 }
 ```
 
-Restart Claude Desktop and you're set. (Microsoft Store installs of Claude Desktop keep this config under `%LOCALAPPDATA%\Packages\Claude...\LocalCache\Roaming\Claude` instead.)
+For Codex and ChatGPT desktop, register it with:
+
+```powershell
+codex mcp add solidworks -- python C:\path\to\Solidworks-MCP-Server\server.py
+```
+
+Restart the configured client and you're set. (Microsoft Store installs of Claude Desktop keep its config under `%LOCALAPPDATA%\Packages\Claude...\LocalCache\Roaming\Claude` instead.)
 
 ## Try it
 
