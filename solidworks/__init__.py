@@ -17,6 +17,7 @@ from .state_query import StateQueryTools
 from .document_manager import DocumentManagerTools
 from .assembly import AssemblyTools
 from .configurations import ConfigurationTools
+from .feature_tree import FeatureTreeTools
 
 __all__ = [
     'SolidWorksConnection',
@@ -34,4 +35,5 @@ __all__ = [
     'DocumentManagerTools',
     'AssemblyTools',
     'ConfigurationTools',
+    'FeatureTreeTools',
 ]

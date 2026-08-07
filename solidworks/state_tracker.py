@@ -335,6 +335,70 @@ class StateTracker:
 
     # --- Feature tracking ---
 
+    def rename_object(self, old_sw_name: str, new_sw_name: str) -> Optional[str]:
+        """Re-key a tracked feature / sketch / reference-geometry record after
+        it has been renamed in SolidWorks, returning the new stable ID.
+
+        Stable IDs embed the SolidWorks name (`feat:Boss-Extrude1`), so a
+        rename would otherwise strand every ID an agent is already holding.
+        Sketch renames additionally re-key that sketch's entity IDs
+        (`entity:<sketch>/rect_0`) and any feature that consumed it.
+        Returns None when the object was not tracked (renaming an untracked
+        feature is legal — tools accept raw SolidWorks names too).
+        """
+        if old_sw_name == new_sw_name:
+            return None
+        scope = self._scope()
+
+        old_fid, new_fid = f"feat:{old_sw_name}", f"feat:{new_sw_name}"
+        if old_fid in scope.features:
+            record = scope.features.pop(old_fid)
+            record.feature_id = new_fid
+            record.sw_name = new_sw_name
+            scope.features[new_fid] = record
+            logger.info(f"Renamed tracked feature {old_fid} -> {new_fid}")
+            return new_fid
+
+        old_sid, new_sid = f"sketch:{old_sw_name}", f"sketch:{new_sw_name}"
+        if old_sid in scope.sketches:
+            record = scope.sketches.pop(old_sid)
+            record.sketch_id = new_sid
+            record.sw_name = new_sw_name
+            scope.sketches[new_sid] = record
+
+            # entity IDs embed the sketch name
+            prefix = f"entity:{old_sw_name}/"
+            for eid in [k for k in scope.entities if k.startswith(prefix)]:
+                entity = scope.entities.pop(eid)
+                entity.entity_id = f"entity:{new_sw_name}/{eid[len(prefix):]}"
+                entity.sketch_name = new_sw_name
+                scope.entities[entity.entity_id] = entity
+            for entity in record.entities:
+                if entity.entity_id.startswith(prefix):
+                    entity.entity_id = (f"entity:{new_sw_name}/"
+                                        f"{entity.entity_id[len(prefix):]}")
+                entity.sketch_name = new_sw_name
+
+            # features that consumed this sketch point at its old ID
+            for feature in scope.features.values():
+                if feature.source_sketch in (old_sid, old_sw_name):
+                    feature.source_sketch = new_sid
+            if scope.active_sketch in (old_sid, old_sw_name):
+                scope.active_sketch = new_sid
+            logger.info(f"Renamed tracked sketch {old_sid} -> {new_sid}")
+            return new_sid
+
+        old_rid, new_rid = f"ref:{old_sw_name}", f"ref:{new_sw_name}"
+        if old_rid in scope.ref_geometry:
+            record = scope.ref_geometry.pop(old_rid)
+            record.ref_id = new_rid
+            record.sw_name = new_sw_name
+            scope.ref_geometry[new_rid] = record
+            logger.info(f"Renamed tracked ref geometry {old_rid} -> {new_rid}")
+            return new_rid
+
+        return None
+
     def register_feature(self, sw_name: str, feature_type: str,
                          source_sketch: Optional[str] = None,
                          parameters: Optional[Dict] = None) -> str:

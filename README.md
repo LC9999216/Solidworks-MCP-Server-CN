@@ -4,7 +4,7 @@ Control SolidWorks with plain language. This [Model Context Protocol](https://mo
 
 This is, as far as I can tell, the most complete MCP server for SolidWorks available, and I will be expanding as time allows.
 
-At present, the connected AI client gets **89 tools** <!-- I've had to update this like 8 times --> covering sketching, solid features, assemblies with mates, configurations, equations, and — critically — *feedback*: it can query faces and edges, check mass properties, detect interference, and take labeled screenshots of the model to see what it's actually building.
+The connected AI client gets a broad tool set covering sketching, solid features, assemblies with mates, configurations, equations, neutral-format import/export, and — critically — *feedback*: it can query faces and edges, check mass properties, detect interference, and take labeled screenshots of the model to see what it's actually building.
 
 ## What it can do
 
@@ -13,6 +13,8 @@ At present, the connected AI client gets **89 tools** <!-- I've had to update th
 - **Assemblies** — insert saved parts, position them with mates (coincident, concentric, distance, angle, gears...), check interference
 - **Parametrics** — named configurations, per-configuration dimensions, and equations that re-solve when driving dimensions change
 - **Model awareness** — Claude can enumerate faces/edges with exact coordinates, find a face by description ("the angled face"), read mass properties against any coordinate system, and look at labeled screenshots of the model mid-build
+- **Import and export** — open STEP / IGES / Parasolid / ACIS / STL files, optionally running feature recognition to rebuild a parametric tree from an imported solid; export to the same formats by giving `save_document` a neutral extension
+- **A readable design tree** — read the timeline as structured data, rename features and sketches to say what they're *for*, and group them into folders, so the model a human opens is one they can follow
 - **State tracking** — every feature, sketch, and entity gets a stable ID, scoped per document, so multi-part + assembly sessions stay coherent
 
 ## What it can't do
@@ -132,10 +134,10 @@ Claude works best when you give real dimensions, but it will make sensible choic
 
 ## The tools
 
-All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimensions are **millimeters**, angles are **degrees** — conversion to the COM API's meters/radians happens internally.
+Every tool is prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimensions are **millimeters**, angles are **degrees** — conversion to the COM API's meters/radians happens internally.
 
 <details>
-<summary><strong>Sketching (21 tools)</strong></summary>
+<summary><strong>Sketching</strong></summary>
 
 | Tool | Description |
 |---|---|
@@ -162,7 +164,7 @@ All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimen
 </details>
 
 <details>
-<summary><strong>Modeling (11 tools)</strong></summary>
+<summary><strong>Modeling</strong></summary>
 
 | Tool | Description |
 |---|---|
@@ -180,7 +182,7 @@ All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimen
 </details>
 
 <details>
-<summary><strong>Features — boss & cut (8 tools)</strong></summary>
+<summary><strong>Features — boss & cut</strong></summary>
 
 | Tool | Description |
 |---|---|
@@ -192,7 +194,7 @@ All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimen
 </details>
 
 <details>
-<summary><strong>Applied features (7 tools)</strong></summary>
+<summary><strong>Applied features</strong></summary>
 
 | Tool | Description |
 |---|---|
@@ -207,7 +209,7 @@ All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimen
 </details>
 
 <details>
-<summary><strong>Patterns & holes (5 tools)</strong></summary>
+<summary><strong>Patterns & holes</strong></summary>
 
 | Tool | Description |
 |---|---|
@@ -220,7 +222,7 @@ All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimen
 </details>
 
 <details>
-<summary><strong>Reference geometry (4 tools)</strong></summary>
+<summary><strong>Reference geometry</strong></summary>
 
 | Tool | Description |
 |---|---|
@@ -232,7 +234,7 @@ All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimen
 </details>
 
 <details>
-<summary><strong>Seeing the model (10 tools)</strong></summary>
+<summary><strong>Seeing the model</strong></summary>
 
 | Tool | Description |
 |---|---|
@@ -249,12 +251,14 @@ All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimen
 </details>
 
 <details>
-<summary><strong>Documents & assemblies (15 tools)</strong></summary>
+<summary><strong>Documents & assemblies</strong></summary>
 
 | Tool | Description |
 |---|---|
-| `save_document` | True Save As (bare filenames land in `workspace/`) |
-| `open_document` / `activate_document` / `close_document` / `list_documents` | Multi-document sessions |
+| `save_document` | True Save As (bare filenames land in `workspace/`) — or **export** by giving a neutral extension (`.STEP`, `.IGS`, `.X_T`, `.SAT`, `.STL`), which leaves the SolidWorks document open and unchanged |
+| `open_document` / `activate_document` / `close_document` / `list_documents` | Multi-document sessions; neutral CAD files route to the importer automatically |
+| `import_file` | Import STEP / IGES / Parasolid / ACIS / STL as a part, optionally running feature recognition |
+| `recognize_features` | Rebuild a parametric feature tree from an imported solid (FeatureWorks) so its dimensions can be driven |
 | `capture_views` | Export standard-view PNGs (isometric, front, top, ...) to disk |
 | `new_assembly` | New assembly document |
 | `insert_component` | Insert a saved part (first component is auto-fixed) |
@@ -267,7 +271,19 @@ All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimen
 </details>
 
 <details>
-<summary><strong>Configurations & equations (7 tools)</strong></summary>
+<summary><strong>Design tree</strong></summary>
+
+| Tool | Description |
+|---|---|
+| `get_feature_tree` | The timeline as structured data: build order, type, tracked ID, suppression, folder contents, and absorbed sub-features |
+| `rename_feature` | Give a feature, sketch or plane a meaningful name — tracked IDs follow the rename |
+| `create_feature_folder` | Group features into a named folder |
+| `move_to_folder` | Move features into an existing folder (see Known limitations) |
+
+</details>
+
+<details>
+<summary><strong>Configurations & equations</strong></summary>
 
 | Tool | Description |
 |---|---|
@@ -278,7 +294,7 @@ All 89 tools are prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimen
 </details>
 
 <details>
-<summary><strong>Batching (1 tool)</strong></summary>
+<summary><strong>Batching</strong></summary>
 
 | Tool | Description |
 |---|---|
@@ -332,6 +348,8 @@ Contributions welcome — please open an issue or PR.
 
 - Drawing (2D drafting) generation isn't implemented yet.
 - `hole_wizard` may trigger a blocking dialog (see Troubleshooting).
+- Design-tree folders are **flat**, and a folder's membership has to be decided when you create it: SolidWorks rejects `MoveToFolder` for moving features into an existing folder, and folders can't be nested. `create_feature_folder` with the full feature list is the path that works.
+- `recognize_features` recovers a *partial* tree. On real mechanical parts it typically reconstructs holes, fillets and chamfers around a structural core it can't decompose, leaving the remainder in an `Imported<n>` body — so treat it as a head start, not a full parametric rebuild. It also needs SOLIDWORKS Professional or Premium.
 - WIDTH mates aren't implemented; component positioning is mate-driven (direct transform setting isn't available via late-bound COM).
 - no PDM / PDM Pro or 3DExperience (Enovia) awareness.  If you have extra PDM Pro licenses, or access to the Enovia API docs, please reach out!
 
