@@ -9,10 +9,28 @@ COM notes (verified via live probe, SW2025):
     which is a TRUE Save As: the open document rebinds to the new path and its
     title changes. Do NOT use options=2 (swSaveAsOptions_Copy) — it writes a
     detached copy and leaves the session document unsaved/untitled.
+  - The SAME SaveAs call exports neutral formats when the path carries a
+    translator extension (.STEP, .IGS, .X_T, ...). Verified: the session
+    document does NOT rebind on a neutral export — the title is unchanged —
+    so an export must not touch the tracker's document scope.
   - OpenDoc6 / ActivateDoc3 need VARIANT byref args for errors — handled in
     connection.py.
+  - OpenDoc6 CANNOT open neutral formats: on a STEP file it fails with
+    swFileLoadError_e 2097152 (swFileRequiresRepairError), which is a
+    misleading error — the file is fine, the API is simply wrong. Neutral
+    import goes through ISldWorks::LoadFile4(path, "r", importData, err).
   - Document titles may or may not include the file extension depending on
     Windows Explorer settings; the state tracker normalizes scope keys.
+
+Feature recognition (FeatureWorks):
+  - Binaries ship with SOLIDWORKS at fworks\\fworks.dll but the add-in is not
+    loaded by default. LoadAddIn(dll) then GetAddInObject(
+    "FeatureWorks.FeatureWorksApp") returns IFeatureWorksApp. Requires
+    SOLIDWORKS Professional/Premium.
+  - Recognition needs a DUMB solid, so 3D Interconnect
+    (swMultiCAD_Enable3DInterconnect = 691) must be OFF during import.
+    With it ON the import lands as an associative "<file>.STEP<1>" [MBimport]
+    feature that cannot be recognised.
 """
 
 import json
@@ -48,6 +66,41 @@ _TYPE_TO_NAME = {
     DOC_TYPE_DRAWING: "drawing",
 }
 
+# Neutral CAD formats. SaveAs exports to these off the extension alone;
+# LoadFile4 imports them. Keep the two lists separate — SolidWorks can write
+# some formats it cannot read back.
+_EXPORT_EXT = {
+    ".step", ".stp", ".iges", ".igs", ".x_t", ".x_b", ".sat",
+    ".stl", ".3mf", ".obj", ".ply", ".wrl",
+}
+_IMPORT_EXT = {
+    ".step", ".stp", ".iges", ".igs", ".x_t", ".x_b", ".sat", ".stl", ".3mf",
+}
+
+# swUserPreferenceToggle_e — values read from swconst.tlb and confirmed live
+PREF_3D_INTERCONNECT = 691   # swMultiCAD_Enable3DInterconnect
+PREF_DIAG_NEUTRAL = 690      # swImportNeutralRunDiagnostics
+PREF_DIAG_AUTO = 291         # swImportAutoRunImportDiagnostics
+
+# FeatureWorks
+FWORKS_DLL = r"C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\fworks\fworks.dll"
+FWORKS_PROGID = "FeatureWorks.FeatureWorksApp"
+
+# Automatic-recognition feature types, from FWorks.tlb. fwVolume is what lets
+# the recogniser find the BASE feature — without it a simple prismatic part
+# recognises nothing (measured: plate with hole+fillet returned 0 features on
+# mask 61, 3 features on mask 63).
+FW_TYPES = {
+    "EXTRUDE": 1, "VOLUME": 2, "REVOLVE": 4, "HOLES": 8,
+    "CHAMFER_FILLET": 16, "RIBS": 32,
+    "BASE_FLANGE": 64, "SKETCHED_BEND": 128,
+    "EDGE_FLANGE": 256, "HEM_FLANGE": 512,
+}
+FW_DEFAULT_TYPES = ["EXTRUDE", "VOLUME", "REVOLVE", "HOLES", "CHAMFER_FILLET", "RIBS"]
+# CreateFeatures options
+FW_ADD_CONSTRAINTS = 1
+FW_ALLOW_FAIL = 2
+
 # Default directory for documents saved with a bare filename
 WORKSPACE_DIR = Path(__file__).parent.parent / "workspace"
 
@@ -73,13 +126,13 @@ class DocumentManagerTools:
         return [
             Tool(
                 name="solidworks_save_document",
-                description="Save the active document to disk. Required before a part can be inserted into an assembly. A bare filename (e.g. 'bracket') is saved into the project workspace directory; an absolute path is used as-is. The correct extension (.SLDPRT/.SLDASM) is added automatically based on document type.",
+                description="Save the active document to disk. Required before a part can be inserted into an assembly. A bare filename (e.g. 'bracket') is saved into the project workspace directory; an absolute path is used as-is. The correct extension (.SLDPRT/.SLDASM) is added automatically based on document type. Giving a neutral-format extension instead (.STEP, .STP, .IGS, .X_T, .SAT, .STL, .3MF) EXPORTS to that format — the SolidWorks document stays open and unchanged, so you can keep modelling after an export.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Filename or absolute path to save to (extension optional)"
+                            "description": "Filename or absolute path to save to (extension optional for native saves; give .STEP/.STP/.IGS/.X_T/.SAT/.STL to export)"
                         }
                     },
                     "required": ["path"]
@@ -87,16 +140,61 @@ class DocumentManagerTools:
             ),
             Tool(
                 name="solidworks_open_document",
-                description="Open a part, assembly, or drawing document from disk (silently, no dialogs). The opened document becomes active.",
+                description="Open a part, assembly, or drawing document from disk (silently, no dialogs). The opened document becomes active. Neutral CAD files (.STEP/.STP/.IGS/.X_T/.SAT/.STL) are routed to the importer automatically — see solidworks_import_file for the import options.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Absolute path to the .SLDPRT/.SLDASM/.SLDDRW file"
+                            "description": "Absolute path to the .SLDPRT/.SLDASM/.SLDDRW file, or a neutral CAD file to import"
                         }
                     },
                     "required": ["path"]
+                }
+            ),
+            Tool(
+                name="solidworks_import_file",
+                description="Import a neutral CAD file (STEP/IGES/Parasolid/ACIS/STL) as a new part. By default the file lands as a single dumb solid body ('Imported1') with no feature history — geometry queries, fillets, cuts and direct edits all work on it, but there are no parametric dimensions to drive. Set recognizeFeatures=true to run FeatureWorks afterwards and rebuild a real feature tree. Import takes a few seconds for small parts and ~10s for large ones.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Absolute path to the .STEP/.STP/.IGS/.IGES/.X_T/.X_B/.SAT/.STL file"
+                        },
+                        "recognizeFeatures": {
+                            "type": "boolean",
+                            "description": "Run FeatureWorks feature recognition after import (default false). Adds ~1-2 minutes on a complex part."
+                        },
+                        "linked": {
+                            "type": "boolean",
+                            "description": "Import via 3D Interconnect as a LINKED, associative body that updates when the source file changes (default false). Linked bodies cannot be feature-recognized or parametrically edited."
+                        }
+                    },
+                    "required": ["path"]
+                }
+            ),
+            Tool(
+                name="solidworks_recognize_features",
+                description="Run FeatureWorks feature recognition on the active part, converting an imported dumb solid into a parametric feature tree (extrudes, hole-wizard holes, fillets, chamfers, revolves). The recovered features carry drivable dimensions usable with set_parameter (e.g. 'D1@Fillet1'). NOTE: recognized SKETCHES come back constrained but NOT dimensioned, so sketch profiles cannot be driven numerically — change the shape of a recognized cut by editing sketch geometry or by direct face editing instead. Requires SOLIDWORKS Professional/Premium.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "featureTypes": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["EXTRUDE", "VOLUME", "REVOLVE", "HOLES",
+                                         "CHAMFER_FILLET", "RIBS", "BASE_FLANGE",
+                                         "SKETCHED_BEND", "EDGE_FLANGE", "HEM_FLANGE"]
+                            },
+                            "description": "Feature types to recognize (default: EXTRUDE, VOLUME, REVOLVE, HOLES, CHAMFER_FILLET, RIBS). Keep VOLUME in the list — it is what finds the base feature; dropping it can make recognition return nothing on simple prismatic parts."
+                        },
+                        "addConstraints": {
+                            "type": "boolean",
+                            "description": "Add sketch constraints to recognized profiles (default true)"
+                        }
+                    }
                 }
             ),
             Tool(
@@ -167,6 +265,8 @@ class DocumentManagerTools:
         dispatch = {
             "solidworks_save_document": lambda: self.save_document(args),
             "solidworks_open_document": lambda: self.open_document(args),
+            "solidworks_import_file": lambda: self.import_file(args),
+            "solidworks_recognize_features": lambda: self.recognize_features(args),
             "solidworks_activate_document": lambda: self.activate_document(args),
             "solidworks_close_document": lambda: self.close_document(args),
             "solidworks_capture_views": lambda: self.capture_views(args),
@@ -189,12 +289,19 @@ class DocumentManagerTools:
 
         raw = args["path"].strip()
         path = Path(raw)
-        if path.suffix.lower() not in _EXT_TO_TYPE:
+        suffix = path.suffix.lower()
+        # A neutral extension means "export", not "save as" — the translator
+        # writes the file and leaves the session document alone.
+        exporting = suffix in _EXPORT_EXT
+        if not exporting and suffix not in _EXT_TO_TYPE:
             path = path.with_name(path.name + ext)
         if not path.is_absolute():
             WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
             path = WORKSPACE_DIR / path
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        if exporting:
+            return self._export_document(doc, path, doc_type)
 
         old_title = doc.GetTitle
 
@@ -223,6 +330,46 @@ class DocumentManagerTools:
             type=_TYPE_TO_NAME.get(doc_type, "document"),
         )
 
+    def _export_document(self, doc, path: Path, doc_type: int) -> str:
+        """Export the active document to a neutral format. Unlike a native
+        Save As this does NOT rebind the session document (verified live: the
+        title is unchanged afterwards), so the tracker scope is left alone."""
+        if path.exists():
+            path.unlink()
+
+        title_before = str(doc.GetTitle)
+        errs = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+        warns = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+        export_data = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
+        ok = doc.Extension.SaveAs(str(path), 0, 1, export_data, errs, warns)
+        if not ok or not path.exists():
+            raise Exception(
+                f"Export failed for {path} (errors={errs.value}, "
+                f"warnings={warns.value}). Check that the format is licensed "
+                f"and the extension is spelled correctly."
+            )
+
+        title_after = str(doc.GetTitle)
+        if title_after != title_before and self.tracker:
+            # Not expected for neutral formats, but if a translator ever does
+            # rebind the document, keep the tracker scope consistent with it.
+            logger.warning(
+                f"Export rebound the session document {title_before!r} -> "
+                f"{title_after!r}; re-keying tracker scope"
+            )
+            self.tracker.rename_document(title_before, title_after)
+
+        size = path.stat().st_size
+        logger.info(f"Exported {title_before} to {path} ({size} bytes)")
+        return self._json_result(
+            f"✓ Exported {_TYPE_TO_NAME.get(doc_type, 'document')} to {path}",
+            path=str(path),
+            format=path.suffix.lstrip(".").upper(),
+            bytes=size,
+            title=title_after,
+            documentStillOpen=True,
+        )
+
     def open_document(self, args: dict) -> str:
         raw = args["path"].strip()
         path = Path(raw)
@@ -232,6 +379,10 @@ class DocumentManagerTools:
                 path = candidate
         if not path.exists():
             raise Exception(f"File not found: {path}")
+
+        # Neutral formats cannot go through OpenDoc6 — route them to LoadFile4.
+        if path.suffix.lower() in _IMPORT_EXT:
+            return self.import_file({**args, "path": str(path)})
 
         doc_type = _EXT_TO_TYPE.get(path.suffix.lower())
         if doc_type is None:
@@ -249,6 +400,262 @@ class DocumentManagerTools:
             path=str(path),
             type=_TYPE_TO_NAME.get(doc_type, "document"),
         )
+
+    # --- neutral-format import + feature recognition ---
+
+    def _set_prefs(self, prefs: dict) -> dict:
+        """Set app-level user preference toggles, returning the previous
+        values so the caller can restore them. These are global SolidWorks
+        settings — leaving them changed would surprise the user."""
+        sw = self.connection.app
+        previous = {}
+        for pref, value in prefs.items():
+            try:
+                previous[pref] = sw.GetUserPreferenceToggle(pref)
+                sw.SetUserPreferenceToggle(pref, value)
+            except Exception as e:
+                logger.warning(f"Could not set user preference {pref}: {e}")
+        return previous
+
+    def _restore_prefs(self, previous: dict):
+        sw = self.connection.app
+        for pref, value in previous.items():
+            try:
+                sw.SetUserPreferenceToggle(pref, value)
+            except Exception as e:
+                logger.warning(f"Could not restore user preference {pref}: {e}")
+
+    def import_file(self, args: dict) -> str:
+        raw = args["path"].strip()
+        path = Path(raw)
+        if not path.is_absolute():
+            candidate = WORKSPACE_DIR / path
+            if candidate.exists():
+                path = candidate
+        if not path.exists():
+            raise Exception(f"File not found: {path}")
+        if path.suffix.lower() not in _IMPORT_EXT:
+            raise Exception(
+                f"Not an importable neutral format: {path.suffix}. "
+                f"Supported: {', '.join(sorted(_IMPORT_EXT))}"
+            )
+
+        linked = bool(args.get("linked", False))
+        recognize = bool(args.get("recognizeFeatures", False))
+        if linked and recognize:
+            raise Exception(
+                "recognizeFeatures cannot be combined with linked=true — a 3D "
+                "Interconnect linked body has no editable feature history to "
+                "recognize. Import with linked=false to get a solid body."
+            )
+
+        sw = self.connection.app
+        # 3D Interconnect ON imports an associative reference instead of a
+        # solid body; import diagnostics can raise a blocking dialog.
+        previous = self._set_prefs({
+            PREF_3D_INTERCONNECT: linked,
+            PREF_DIAG_NEUTRAL: False,
+            PREF_DIAG_AUTO: False,
+        })
+
+        try:
+            try:
+                import_data = sw.GetImportFileData(str(path))
+            except Exception as e:
+                logger.info(f"GetImportFileData unavailable for {path.name} ({e}); "
+                            f"importing with default options")
+                import_data = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
+
+            err = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+            doc = sw.LoadFile4(str(path), "r", import_data, err)
+            if not doc:
+                raise Exception(
+                    f"Import failed for {path} (error={err.value}). "
+                    f"Note that OpenDoc6-style errors do not apply here; a "
+                    f"non-zero code usually means an unreadable or unsupported file."
+                )
+        except Exception:
+            self._restore_prefs(previous)
+            raise
+
+        try:
+            doc = self.connection.get_active_doc()
+            title = str(com_prop(doc, "GetTitle"))
+            doc_type = _doc_type(doc)
+            if self.tracker:
+                self.tracker.activate_document(
+                    title, _TYPE_TO_NAME.get(doc_type, "part"))
+
+            info = self._imported_body_info(doc)
+            logger.info(f"Imported {path.name} -> {title} ({info})")
+
+            result = {
+                "result": f"✓ Imported {path.name} as {title}",
+                "title": title,
+                "path": str(path),
+                "type": _TYPE_TO_NAME.get(doc_type, "part"),
+                "linked": linked,
+                **info,
+            }
+
+            if recognize:
+                rec = self._run_recognition(
+                    doc,
+                    args.get("featureTypes") or FW_DEFAULT_TYPES,
+                    bool(args.get("addConstraints", True)),
+                )
+                result["featureRecognition"] = rec
+                result["result"] = (
+                    f"✓ Imported {path.name} as {title}; "
+                    f"recognized {rec.get('featuresRecognized', 0)} feature(s)"
+                )
+            elif not linked:
+                result["hint"] = (
+                    "Imported as a dumb solid with no feature history. Geometry "
+                    "queries and new features work on it; for parametric "
+                    "dimensions call solidworks_recognize_features."
+                )
+
+            return json.dumps(result)
+        finally:
+            self._restore_prefs(previous)
+
+    def _imported_body_info(self, doc) -> dict:
+        """Best-effort body/face/edge counts plus the top-level feature names."""
+        info = {}
+        try:
+            bodies = doc.GetBodies2(0, True) or []
+            faces = edges = 0
+            for body in bodies:
+                faces += len(body.GetFaces() or [])
+                edges += len(body.GetEdges() or [])
+            info.update({"bodies": len(bodies), "faces": faces, "edges": edges})
+        except Exception as e:
+            logger.warning(f"Could not count imported geometry: {e}")
+        try:
+            info["features"] = [n for n, _ in self._feature_tree(doc)]
+        except Exception as e:
+            logger.warning(f"Could not read imported feature tree: {e}")
+        return info
+
+    _TREE_BOILERPLATE = {
+        "CommentsFolder", "FavoriteFolder", "HistoryFolder", "SelectionSetFolder",
+        "SensorFolder", "DocsFolder", "DetailCabinet", "SurfaceBodyFolder",
+        "SolidBodyFolder", "EnvFolder", "InkMarkupFolder", "EqnFolder",
+        "MaterialFolder", "RefPlane", "OriginProfileFeature",
+    }
+
+    def _feature_tree(self, doc, limit: int = 400) -> list:
+        """Walk the FeatureManager tree, skipping the standard folders."""
+        out = []
+        feat = com_prop(doc, "FirstFeature")
+        seen = 0
+        while feat is not None and seen < limit:
+            seen += 1
+            try:
+                name = str(com_prop(feat, "Name"))
+                type_name = str(com_prop(feat, "GetTypeName2"))
+            except Exception:
+                break
+            if type_name not in self._TREE_BOILERPLATE:
+                out.append((name, type_name))
+            try:
+                feat = com_prop(feat, "GetNextFeature")
+            except Exception:
+                break
+        return out
+
+    def _get_featureworks(self):
+        """Load the FeatureWorks add-in and return IFeatureWorksApp, or None.
+        LoadAddIn returns 0 on a fresh load and 2 when already loaded."""
+        sw = self.connection.app
+        try:
+            status = sw.LoadAddIn(FWORKS_DLL)
+            logger.info(f"FeatureWorks LoadAddIn -> {status}")
+        except Exception as e:
+            logger.warning(f"FeatureWorks LoadAddIn failed: {e}")
+        try:
+            return sw.GetAddInObject(FWORKS_PROGID)
+        except Exception as e:
+            logger.warning(f"GetAddInObject({FWORKS_PROGID}) failed: {e}")
+            return None
+
+    def _run_recognition(self, doc, feature_types, add_constraints: bool) -> dict:
+        unknown = [t for t in feature_types if t.upper() not in FW_TYPES]
+        if unknown:
+            raise Exception(
+                f"Unknown feature type(s): {', '.join(unknown)}. "
+                f"Valid: {', '.join(sorted(FW_TYPES))}"
+            )
+        mask = 0
+        for t in feature_types:
+            mask |= FW_TYPES[t.upper()]
+
+        fw = self._get_featureworks()
+        if fw is None:
+            raise Exception(
+                "FeatureWorks is not available. It ships with SOLIDWORKS but "
+                "requires a Professional or Premium license. Without it an "
+                "imported body stays a dumb solid — it can still be measured, "
+                "cut, filleted and direct-edited, just not driven by dimensions."
+            )
+
+        before = self._feature_tree(doc)
+        recognized = fw.RecognizeFeatureAutomatic(mask)
+        create_opts = FW_ALLOW_FAIL | (FW_ADD_CONSTRAINTS if add_constraints else 0)
+        created = fw.CreateFeatures(create_opts)
+
+        doc = self.connection.get_active_doc()
+        after = self._feature_tree(doc)
+        logger.info(
+            f"FeatureWorks recognized {recognized} feature(s); "
+            f"CreateFeatures={created}; tree {len(before)} -> {len(after)}"
+        )
+
+        out = {
+            "featuresRecognized": int(recognized) if recognized is not None else 0,
+            "featuresCreated": bool(created),
+            "featureTypes": [t.upper() for t in feature_types],
+            "treeBefore": [n for n, _ in before],
+            "treeAfter": [{"name": n, "type": t} for n, t in after],
+        }
+        if not created or not recognized:
+            out["hint"] = (
+                "Recognition found nothing. Make sure VOLUME is in featureTypes "
+                "— it is what identifies the base feature. If it still fails the "
+                "geometry may not decompose into machining features; the body is "
+                "unchanged and remains directly editable."
+            )
+        else:
+            out["hint"] = (
+                "Recognized features carry drivable dimensions (e.g. "
+                "'D1@Fillet1') usable with set_parameter and list_parameters. "
+                "Recognized SKETCHES are constrained but NOT dimensioned, so "
+                "profile shapes cannot be driven numerically."
+            )
+        return out
+
+    def recognize_features(self, args: dict) -> str:
+        doc = self.connection.get_active_doc()
+        if not doc:
+            raise Exception("No active document to recognize features on")
+        if _doc_type(doc) != DOC_TYPE_PART:
+            raise Exception("Feature recognition only works on part documents")
+
+        previous = self._set_prefs({PREF_DIAG_NEUTRAL: False, PREF_DIAG_AUTO: False})
+        try:
+            rec = self._run_recognition(
+                doc,
+                args.get("featureTypes") or FW_DEFAULT_TYPES,
+                bool(args.get("addConstraints", True)),
+            )
+        finally:
+            self._restore_prefs(previous)
+
+        return json.dumps({
+            "result": f"✓ Recognized {rec['featuresRecognized']} feature(s)",
+            **rec,
+        })
 
     def activate_document(self, args: dict) -> str:
         name = args["name"].strip()

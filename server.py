@@ -29,6 +29,7 @@ from solidworks import (
     DocumentManagerTools,
     AssemblyTools,
     ConfigurationTools,
+    FeatureTreeTools,
 )
 
 # Configure logging
@@ -66,6 +67,7 @@ class SolidWorksMCPServer:
         self.document_manager = DocumentManagerTools(self.connection, self.tracker)
         self.assembly = AssemblyTools(self.connection, self.tracker)
         self.configurations = ConfigurationTools(self.connection, self.tracker)
+        self.feature_tree = FeatureTreeTools(self.connection, self.tracker)
 
         # All modules (order matters for tool listing)
         self._modules = [
@@ -82,6 +84,7 @@ class SolidWorksMCPServer:
             self.document_manager,
             self.assembly,
             self.configurations,
+            self.feature_tree,
         ]
 
         # Build dispatch map: tool_name -> module

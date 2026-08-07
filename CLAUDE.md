@@ -79,6 +79,7 @@ solidworks/
   document_manager.py             # Document lifecycle (save, open, activate, close, list, capture_views)
   assembly.py                     # Assembly tools (new assembly, insert component, mates, interference, assembly queries)
   configurations.py               # Configurations (variants, per-config dims) and equations
+  feature_tree.py                 # Timeline as structured data, renaming, folders
   com_utils.py                    # Shared late-bound COM helpers (com_prop)
 test.py                           # Unified test suite with registry, CLI selector (--gui), category/test filters
 clean.py                          # Close all open SolidWorks documents (standalone utility)
@@ -131,57 +132,65 @@ All tools accept both tracked IDs and raw SolidWorks names. When raw names are u
 
 **Extrusion end conditions:** Both `create_extrusion` and `create_cut_extrusion` accept an optional `endCondition` parameter: `"BLIND"` (default, extrudes to specified depth) or `"THROUGH_ALL"` (extrudes through entire body). Through All is especially useful for cut-extrusions where the agent doesn't need to calculate exact depth.
 
-### Sketch Tools (21 tools)
+### Sketch Tools
 
 `sketch_rectangle`, `sketch_circle`, `sketch_profile` (whole chained LINE/TANGENT_ARC/ARC profile in one call, optional auto-close + corner fillets — preferred over many line/arc calls), `sketch_fillet` (round a sketch corner by vertex with an exact tangent arc), `sketch_offset` (offset existing geometry/chain by a distance; negative flips side), `sketch_line`, `sketch_centerline`, `sketch_arc` (3-point or center-point), `sketch_spline`, `sketch_ellipse`, `sketch_polygon`, `sketch_slot`, `sketch_point`, `sketch_text`, `sketch_dimension` (add smart dimension with optional driving value), `set_dimension_value` (modify existing dimension), `sketch_constraint`, `sketch_toggle_construction`, `create_sketch`, `exit_sketch`, `get_last_shape_info`.
 
-### Modeling Tools (11 tools)
+### Modeling Tools
 
 `new_part`, `create_extrusion` (optional `merge: false` creates a separate body for multi-body work), `create_cut_extrusion` (cut direction auto-flips into the body when the first attempt fails — sketches on boundary planes just work), `combine_bodies` (ADD/SUBTRACT/COMMON boolean of a multi-body part; swBodyOperationType_e probed live: 15901=COMMON, 15902=SUBTRACT, 15903=ADD — reverse of common docs), `set_material` (assign a SOLIDWORKS Materials entry, e.g. '6061 Alloy' — required for mass questions; density is default 1000 kg/m³ otherwise), `set_parameter` (set any dimension by name, e.g. 'D1@Boss-Extrude1' — parametric "modify the part" operations), `suppress_feature`, `delete_feature`, `get_mass_properties` (kg + grams; optional `coordinateSystem` reports COM relative to a coordinate-system feature), `list_features`, `list_parameters` (every driving dimension with its addressable name, value, unit, and owning feature — use before `set_parameter`/`set_config_parameter`/equations instead of guessing names).
 
 **Sketch coordinate frames:** `create_sketch` returns `sketchFrame` (origin + X/Y axis directions in model space). Face sketches can have mirrored or rotated axes (back face: sketch X = model −X; top face: sketch Y = model −Z) — convert model targets with `sketch_x = xAxisModel · (target − originModel_mm)`. The sketch ORIGIN on a face is the model origin projected onto the face plane, NOT the face center — face sketches therefore also return `faceCenter` (`model_mm` + `sketch_mm`, from the face bounding box) as the layout datum.
 
-### Configuration & Equation Tools (7 tools)
+### Configuration & Equation Tools
 
 `add_configuration`, `switch_configuration`, `list_configurations`, `set_config_parameter` (dimension value in ONE configuration only), `add_equation` (e.g. `"D1@Boss-Extrude1" = "D1@Sketch1" / 2` — re-solves automatically when driving dims change), `list_equations`, `delete_equation`.
 
-### Boss/Base Features (4 tools)
+### Boss/Base Features
 
 `revolve` (requires centerline in sketch), `sweep` (profile + path sketches), `loft` (2+ profile sketches), `boundary_boss` (profiles + optional guide curves).
 
-### Cut Features (4 tools)
+### Cut Features
 
 `cut_revolve`, `cut_sweep`, `cut_loft`, `boundary_cut`. Same params as boss counterparts but remove material.
 
-### Applied Features (7 tools)
+### Applied Features
 
 `fillet` (edges + radius), `chamfer` (edges + distance) — both accept a `feature` param that fillets/chamfers every edge of that feature by selecting IEdge objects DIRECTLY via `Select4` (view-independent, includes closed/circular edges; PREFERRED over coordinates), `shell` (faces to remove + thickness), `draft` (neutral plane + faces + angle), `rib` (sketch profile + thickness), `wrap` (emboss/deboss/scribe onto face), `intersect` (overlapping bodies).
 
 **Selection pitfall:** `SelectByID2` coordinate picks resolve against the CURRENT CAMERA VIEW — geometry occluded from the camera cannot be picked even with exact on-geometry coordinates (no single view sees all 12 edges of a box), and geometry viewed edge-on can silently hijack a pick meant for its neighbor. Prefer direct object selection (`selection_helpers.select_entities_directly`, used by fillet's `feature` path) for anything enumerable via COM traversal. `create_sketch`'s face path verifies the picked face is within 1mm of the requested point and falls back to nearest-face object selection (`_face_object_at_point`) — both occlusion and edge-on mis-picks self-heal. Other coordinate-based tools warn about this in their error messages.
 
-### Patterns (3 tools)
+### Patterns
 
 `linear_pattern` (features + direction + spacing + count, optional 2nd direction; direction accepts `{"axis": "X"|"Y"|"Z"}` — PREFERRED, picks any parallel body edge via object selection — or a coordinate point on an edge), `circular_pattern` (features + axis + count + angle), `mirror` (features + mirror plane).
 
-### Hole Features (2 tools)
+### Hole Features
 
 `hole_wizard` (FLAGGED: may trigger blocking dialog), `thread` (cosmetic thread on circular edge).
 
-### Reference Geometry (4 tools)
+### Reference Geometry
 
 `ref_plane` (offset/angle/through-point), `ref_axis` (two-points/cylindrical-face/edge), `ref_point` (coordinates/arc-center/face-center/on-edge), `coordinate_system` (origin + optional axis edges).
 
-### Geometry Query Tools (7 tools)
+### Geometry Query Tools
 
 `get_body_info` (bounding box, face/edge/vertex counts), `get_faces` (enumerate with type, area, normal, sample point; optional `surfaceType` filter), `get_edges` (enumerate with endpoints, midpoint, length; optional `edgeType` and `feature` filters), `get_face_edges` (edges of a specific face by coordinate), `get_vertices` (all unique vertex coordinates), `find_face` (select a face by DESCRIPTION: orientation +X/−X/.../ANGLED/ANY, creating feature, surface type, and/or area rank — returns sample points ready for `create_sketch`/selection tools; face normals are sense-corrected OUTWARD via `FaceInSurfaceSense`, same as `get_faces` details), `look_at_model` (screenshot of the model returned as image content in the MCP response, with face labels F0/F1/... matching `get_faces` indices; `view='sketch'` captures the active sketch normal-to; labels need Pillow).
 
 **Feature tagging:** every face returned by `get_faces`/`get_face_edges` includes `"feature"` (and `"featureId"` when tracked) — the feature that created it, via `IFace2.GetFeature`. Every edge from `get_edges` includes a `"features"` list (features whose faces meet at that edge, via `GetTwoAdjacentFaces2`). This lets agents select geometry by feature ("fillet the edges of Boss-Extrude2") instead of guessing coordinates.
+### Document Tools
 
-### Document Tools (6 tools)
+`save_document` (true Save As; bare filenames go to `workspace/`; required before inserting a part into an assembly; a neutral extension — .STEP/.STP/.IGS/.X_T/.SAT/.STL/.3MF — **exports** instead, leaving the session document open and unchanged), `open_document` (silent OpenDoc6; neutral formats auto-route to `import_file`), `import_file` (neutral CAD import), `recognize_features` (FeatureWorks), `activate_document` (switch active doc — subsequent tools operate on it), `close_document` (discards unsaved changes), `capture_views` (export standard-view PNGs — default ISOMETRIC/FRONT/TOP — to `workspace/screenshots` or a given `outputDir`), `list_documents`.
 
-`save_document` (true Save As; bare filenames go to `workspace/`; required before inserting a part into an assembly), `open_document` (silent OpenDoc6), `activate_document` (switch active doc — subsequent tools operate on it), `close_document` (discards unsaved changes), `capture_views` (export standard-view PNGs — default ISOMETRIC/FRONT/TOP — to `workspace/screenshots` or a given `outputDir`), `list_documents`.
+**Neutral-format import:** `OpenDoc6` **cannot** open STEP/IGES — it fails with `swFileRequiresRepairError` (2097152), which is misleading; the file is fine. Import goes through `ISldWorks::LoadFile4(path, "r", importData, err)` with `importData` from `GetImportFileData`. `import_file` handles this, and forces 3D Interconnect (`swMultiCAD_Enable3DInterconnect` = **691**) OFF for the duration: with it ON the file lands as an associative `<file>.STEP<1>` `[MBimport]` feature that cannot be feature-recognized or parametrically edited; with it OFF you get a dumb `Imported1` `[BaseBody]` solid. Import diagnostics prefs (690, 291) are suppressed so nothing can raise a blocking dialog. All prefs are restored afterwards. Pass `linked: true` to deliberately keep the associative form.
 
-### Assembly Tools (9 tools)
+**Feature recognition (`recognize_features`):** turns an imported dumb solid into a parametric tree. FeatureWorks ships with SOLIDWORKS at `fworks\fworks.dll` but is not loaded by default and needs Professional/Premium — `LoadAddIn(dll)` then `GetAddInObject("FeatureWorks.FeatureWorksApp")` (that exact ProgID; the obvious guesses return `None`). `IFeatureWorksApp` = `RecognizeFeatureAutomatic(mask)` → count, then `CreateFeatures(opts)` → bool. Mask bits: EXTRUDE 1, **VOLUME 2**, REVOLVE 4, HOLES 8, CHAMFER_FILLET 16, RIBS 32.
+
+- **Keep VOLUME in the mask** — it finds the base feature. Measured: a plate with a hole and a fillet recognized 0 features without it, 3 with it.
+- Recovered features are genuinely drivable: `set_parameter("D1@Fillet1", …)` rebuilds and moves the volume as expected.
+- **Recognized sketches are constrained but NOT dimensioned** — there are no `D<i>@Sketch<n>` dimensions, so cut/boss *profiles* cannot be driven numerically. Change those by editing sketch geometry or by direct face editing.
+- Cost: ~6s on a simple part, ~2.5 min on a 435-face one. Volume is preserved to ~0.001%.
+
+### Assembly Tools
 
 `new_assembly`, `insert_component` (pre-opens the part file, re-activates the assembly, AddComponent5; SolidWorks centers the component's **bounding box** at the drop point — the returned `actualPosition` is the component origin; first component is auto-fixed), `add_mate` (COINCIDENT, CONCENTRIC, PERPENDICULAR, PARALLEL, TANGENT, DISTANCE, ANGLE, LOCK; entities are either component planes `{"plane": "Front", "component": "comp:x-1"}` or coordinate picks `{"entityType": "FACE", "x":…, "y":…, "z":…}` in assembly-space mm), `edit_mate` (change a DISTANCE/ANGLE mate's value; rebuilds and returns updated component positions — mate dims are regular dimensions named `D1@<MateName>`), `check_interference` (overlap volumes + components involved), `suppress_component`, `list_components`, `list_mates`, `get_assembly_mass_properties` (kg + grams; optional `coordinateSystem`). `add_mate` also supports GEAR (mateType GEAR + `gearRatioNumerator`/`gearRatioDenominator`). WIDTH mates are not yet implemented.
 
@@ -189,7 +198,24 @@ All tools accept both tracked IDs and raw SolidWorks names. When raw names are u
 
 **Recommended workflow:** After creating geometry, call `get_body_info` for an overview, then `get_faces` or `get_edges` to find exact coordinates for fillet, chamfer, shell, draft, and pattern operations. The sample points and midpoints returned by these tools are guaranteed to be on/near the geometry and can be passed directly to selection-based tools.
 
-### State Query Tools (3 tools)
+### Feature Tree Tools
+
+`get_feature_tree` (the design timeline as structured JSON — build order, type, tracked ID, suppression, folder nesting, and absorbed sub-features such as the sketch consumed by an extrude; prefer it over `list_features`, which returns unstructured text), `rename_feature` (`IFeature.Name` is a settable property; the tracker is re-keyed in the same call so `feat:Boss-Extrude1` becomes `feat:Base Plate` and sketch-entity IDs / consuming features follow), `create_feature_folder`, `move_to_folder`.
+
+**Naming is encouraged, not just possible.** Auto-generated names (`Boss-Extrude7`, `Sketch12`) make a model unreadable to a later agent and to the human who opens it. `rename_feature`'s description tells agents to name each feature as they create it, and `get_feature_tree` returns a `hint` listing features that still carry default names.
+
+**Tree traversal gotchas:** `IModelDoc2::FirstFeature` + `GetNextFeature` walks the timeline, but absorbed sketches and foldered features **also appear in that linear walk**, so they must be de-duplicated against what was already emitted as a sub-feature or folder child. Descend into absorbed children with `GetFirstSubFeature`/**`GetNextSubFeature`** — calling `GetNextFeature` on a sub-feature rejoins the top-level chain and the traversal never terminates (this hung a test run). Folder contents come from `IFeature::GetSpecificFeature2()` → `IFeatureFolder::GetFeatures()`.
+
+**Folders — what works and what does not (measured on SW2025 Student Edition):**
+
+- ✅ `InsertFeatureTreeFolder2(2)` = **Containing** wraps the current selection. This is the only reliable way to group features, so **decide a folder's membership when you create it** and pass the full `features` list.
+- ✅ `InsertFeatureTreeFolder2(1)` = **EmptyBefore** creates an empty folder, but it is inserted *above the current selection* and returns `None` if nothing is selected — the tool anchors it on the last feature automatically.
+- ❌ `MoveToFolder(folderName, itemName, moveAfterFolder)` returns **False** in every case tested: into an empty folder, into a populated folder, and folder-into-folder, with either `moveAfterFolder` value. `move_to_folder` is kept so the failure is explicit rather than silent.
+- ❌ **Folders cannot be nested.** `MoveToFolder` refuses a folder child and `IFeatureManager::InsertSubFolder` resolves to a property returning `None`. Use several well-named top-level folders instead of a hierarchy.
+
+**Folder end tags:** every folder adds a closing pseudo-feature named `<Folder>___EndTag___` to the linear walk. It is not a design step — filter it out of any traversal (`get_feature_tree` does).
+
+### State Query Tools
 
 `get_state` (session state for the active document: tracked features/sketches/entities/refGeo — plus live enrichment: bounding box + face/edge counts, per-sketch `constrainedStatus` (FULLY_DEFINED/UNDER_DEFINED), active configuration, open documents, and components/mates for assemblies; `detail: "full"` adds feature parent/child dependencies; all COM enrichment is best-effort so `get_state` never fails), `get_entity` (detailed info about a single object by its tracked ID), `get_sketch_entities` (list all entities in a specific sketch with their types and coordinates).
 
