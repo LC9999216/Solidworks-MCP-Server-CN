@@ -13,9 +13,15 @@
 
 ## 🚀 快速使用
 
-把下面这段说明交给其他编码 Agent，它就能下载本仓库、注册 `solidworks` MCP，并通过该 MCP 操作本机 SolidWorks。🤝
+把下面这句话交给其他编码 Agent，它就能下载本仓库、注册 `solidworks` MCP，并通过该 MCP 操作本机 SolidWorks。🤝
 
-> 在 Windows 上克隆 `https://github.com/LC9999216/Solidworks-MCP-Server.git`，安装 `requirements.txt`，再运行 `codex mcp add solidworks -- C:\\path\\to\\Solidworks-MCP-Server\\.venv\\Scripts\\python.exe C:\\path\\to\\Solidworks-MCP-Server\\server.py`。启动 SolidWorks 后，即可使用 `solidworks_*` 工具创建和编辑三维模型。
+> 🤖 请在 Windows 上安装并配置中文版 SolidWorks MCP：运行 `powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/LC9999216/Solidworks-MCP-Server-CN/main/scripts/install.ps1 | iex"`，完成后重启编码客户端；启动 SolidWorks 后，即可使用 `solidworks_*` 工具创建和编辑三维模型。🛠️✅
+
+也可以直接在 PowerShell 中运行一键安装命令：
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/LC9999216/Solidworks-MCP-Server-CN/main/scripts/install.ps1 | iex"
+```
 
 ### 手动安装 🛠️
 
@@ -28,17 +34,17 @@
 - Codex、Claude Desktop 或 ChatGPT Desktop 🤖
 
 ```powershell
-git clone https://github.com/LC9999216/Solidworks-MCP-Server.git
-cd Solidworks-MCP-Server
+git clone https://github.com/LC9999216/Solidworks-MCP-Server-CN.git
+cd Solidworks-MCP-Server-CN
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ### 注册到 Codex / ChatGPT Desktop ⚙️
 
 ```powershell
-codex mcp add solidworks -- C:\path\to\Solidworks-MCP-Server\.venv\Scripts\python.exe C:\path\to\Solidworks-MCP-Server\server.py
+codex mcp add solidworks -- "C:\path\to\Solidworks-MCP-Server-CN\.venv\Scripts\python.exe" "C:\path\to\Solidworks-MCP-Server-CN\server.py"
 ```
 
 随后完全重启客户端，先启动 SolidWorks，再让 Agent 执行：
@@ -55,8 +61,8 @@ codex mcp add solidworks -- C:\path\to\Solidworks-MCP-Server\.venv\Scripts\pytho
 {
   "mcpServers": {
     "solidworks": {
-      "command": "C:\\path\\to\\Solidworks-MCP-Server\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\path\\to\\Solidworks-MCP-Server\\server.py"]
+      "command": "C:\\path\\to\\Solidworks-MCP-Server-CN\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\path\\to\\Solidworks-MCP-Server-CN\\server.py"]
     }
   }
 }

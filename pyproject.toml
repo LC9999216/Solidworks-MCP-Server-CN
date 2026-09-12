@@ -34,8 +34,8 @@ dev = [
 solidworks-mcp = "server:run"
 
 [project.urls]
-Homepage = "https://github.com/LC9999216/Solidworks-MCP-Server"
-Issues = "https://github.com/LC9999216/Solidworks-MCP-Server/issues"
+Homepage = "https://github.com/LC9999216/Solidworks-MCP-Server-CN"
+Issues = "https://github.com/LC9999216/Solidworks-MCP-Server-CN/issues"
 
 [tool.setuptools]
 # `server` as a top-level module keeps `from server import SolidWorksMCPServer`

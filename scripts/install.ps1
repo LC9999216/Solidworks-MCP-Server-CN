@@ -14,7 +14,7 @@ param(
 #   4. Registers the server with detected or explicitly selected clients
 #
 # Usage (paste into PowerShell):
-#   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/HarrierPigeon/Solidworks-MCP-Server/main/scripts/install.ps1 | iex"
+#   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/LC9999216/Solidworks-MCP-Server-CN/main/scripts/install.ps1 | iex"
 #
 # Re-running the script updates an existing install in place.
 # To uninstall: delete  %LOCALAPPDATA%\SolidWorksMCP  and remove the
@@ -23,7 +23,7 @@ param(
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Repo       = 'HarrierPigeon/Solidworks-MCP-Server'
+$Repo       = 'LC9999216/Solidworks-MCP-Server-CN'
 $InstallDir = Join-Path $env:LOCALAPPDATA 'SolidWorksMCP'
 $AppDir     = Join-Path $InstallDir 'app'
 $VenvDir    = Join-Path $InstallDir 'venv'
