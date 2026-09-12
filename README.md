@@ -1,4 +1,15 @@
-# SolidWorks MCP Server
+# SolidWorks MCP Server 中文适配版
+
+本项目基于 [HarrierPigeon/Solidworks-MCP-Server](https://github.com/HarrierPigeon/Solidworks-MCP-Server) 修改并保留 MIT 许可证。
+
+## 中文版适配
+
+- 标准基准面可识别英文和中文名称，并在名称不可用时按特征树顺序回退识别。
+- 创建草图尺寸时通过 SolidWorks API 临时关闭尺寸输入对话框，避免依赖英文界面的 `Modify` 窗口；操作结束后恢复原有用户设置。
+- 重新打开零件后，可直接通过 SolidWorks COM 读取草图中的直线、圆和圆弧，不依赖当前 MCP 会话中的缓存。
+- 已在中文版 SolidWorks 2024 上验证草图尺寸创建、原生零件重新打开和草图实体读取。
+
+当前安装请使用下方“手动安装”；原项目的一键安装脚本仍指向上游发布包。
 
 Control SolidWorks with plain language. This [Model Context Protocol](https://modelcontextprotocol.io/) server connects AI clients such as Claude and Codex to SolidWorks, so you can describe a part — *"a 60mm mounting bracket with four M5 clearance holes and 3mm fillets"* — and watch it get built, feature by feature, in a real SolidWorks session.
 

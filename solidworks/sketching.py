@@ -6,37 +6,10 @@ Handles sketch creation and drawing operations with spatial tracking
 import json
 import logging
 import math
-import threading
-import time
 from mcp.types import Tool
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
-
-
-def dismiss_modify_dialog(delay=0.5, max_wait=10.0):
-    """Find and auto-dismiss the SolidWorks 'Modify' dimension dialog.
-
-    AddDimension2 triggers a blocking popup (Win32 class #32770, title
-    "Modify").  Call this in a background thread *before* AddDimension2
-    so it can dismiss the dialog as soon as it appears.
-    """
-    import win32gui
-    import win32con
-
-    deadline = time.monotonic() + max_wait
-    time.sleep(delay)
-    while time.monotonic() < deadline:
-        try:
-            hwnd = win32gui.FindWindow("#32770", "Modify")
-            if hwnd and win32gui.IsWindowVisible(hwnd):
-                win32gui.PostMessage(hwnd, win32con.WM_KEYDOWN, win32con.VK_RETURN, 0)
-                win32gui.PostMessage(hwnd, win32con.WM_KEYUP, win32con.VK_RETURN, 0)
-                logger.info("Auto-dismissed 'Modify' dimension dialog")
-                return
-        except Exception:
-            pass
-        time.sleep(0.1)
 
 
 class SketchingTools:
@@ -719,6 +692,33 @@ class SketchingTools:
         if not handler:
             raise Exception(f"Unknown sketching tool: {tool_name}")
         return handler()
+
+    def _find_reference_plane(self, doc, plane_name: str):
+        """Locate standard planes across SolidWorks UI languages."""
+        plane_map = {
+            "Front": ["Front Plane", "前视基准面"],
+            "Top": ["Top Plane", "上视基准面"],
+            "Right": ["Right Plane", "右视基准面"],
+        }
+        for name in plane_map.get(plane_name, [plane_name]):
+            feat = doc.FeatureByName(name)
+            if feat:
+                return feat
+
+        target_index = {"Front": 1, "Top": 2, "Right": 3}.get(plane_name)
+        if target_index:
+            index = 0
+            feat = doc.FirstFeature()
+            while feat:
+                try:
+                    if feat.GetTypeName2() == "RefPlane":
+                        index += 1
+                        if index == target_index:
+                            return feat
+                except Exception:
+                    pass
+                feat = feat.GetNextFeature()
+        return None
     
     def create_sketch(self, args: dict) -> str:
         """Create sketch on a reference plane or a solid face.
@@ -728,12 +728,6 @@ class SketchingTools:
         Otherwise, uses the named reference plane ("Front", "Top", or "Right").
         Face-based sketches are required for cut-extrusions to work.
         """
-        plane_map = {
-            "Front": "Front Plane",
-            "Top": "Top Plane",
-            "Right": "Right Plane"
-        }
-
         face_mode = "faceX" in args and "faceY" in args and "faceZ" in args
 
         # Check for active document
@@ -824,8 +818,7 @@ class SketchingTools:
                              f"area {face_echo.get('area_mm2', '?')} mm2")
         else:
             plane_name = args.get("plane", "Front")
-            plane_feature_name = plane_map.get(plane_name, plane_name)
-            plane_feature = doc.FeatureByName(plane_feature_name)
+            plane_feature = self._find_reference_plane(doc, plane_name)
             if not plane_feature:
                 raise Exception(
                     f"Could not find plane: {plane_name}. "
@@ -1918,16 +1911,19 @@ class SketchingTools:
             if not success:
                 raise Exception(f"Failed to select entity at ({pt['x']}, {pt['y']}) mm")
 
-        # AddDimension2 triggers a blocking "Modify" dialog in SolidWorks.
-        # A background thread auto-dismisses it (see dismiss_modify_dialog).
-        dismiss_thread = threading.Thread(target=dismiss_modify_dialog, daemon=True)
-        dismiss_thread.start()
-
+        # Suppress the dimension dialog via the API, independent of UI language.
+        # swUserPreferenceToggle_e.swInputDimValOnCreate = 10.
+        sw = self.connection.app
+        input_dim_pref = 10
+        previous_input_dim = sw.GetUserPreferenceToggle(input_dim_pref)
         sm = doc.SketchManager
-        sm.AddToDB = True
-        sm.DisplayWhenAdded = False
 
         try:
+            sw.SetUserPreferenceToggle(input_dim_pref, False)
+            if sw.GetUserPreferenceToggle(input_dim_pref):
+                raise Exception("Failed to suppress the dimension input dialog")
+            sm.AddToDB = True
+            sm.DisplayWhenAdded = False
             dim_display = doc.AddDimension2(
                 args["dimX"] / 1000.0,
                 args["dimY"] / 1000.0,
@@ -1963,9 +1959,13 @@ class SketchingTools:
 
             doc.ClearSelection2(True)
         finally:
-            sm.AddToDB = False
-            sm.DisplayWhenAdded = True
-            dismiss_thread.join(timeout=2)
+            try:
+                sm.AddToDB = False
+                sm.DisplayWhenAdded = True
+            finally:
+                sw.SetUserPreferenceToggle(input_dim_pref, previous_input_dim)
+                if sw.GetUserPreferenceToggle(input_dim_pref) != previous_input_dim:
+                    logger.warning("Could not restore the dimension input preference")
 
         logger.info(result_msg)
         return self._json_result(f"✓ {result_msg}", type="dimension",

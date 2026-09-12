@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "solidworks-mcp"
-version = "0.2.0"
-description = "MCP server bridging AI clients with SolidWorks CAD via the COM API"
+name = "solidworks-mcp-cn"
+version = "0.2.1+cn.1"
+description = "Chinese SolidWorks-compatible MCP server bridging AI clients with the COM API"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Joseph Robertson" }]
@@ -34,8 +34,8 @@ dev = [
 solidworks-mcp = "server:run"
 
 [project.urls]
-Homepage = "https://github.com/HarrierPigeon/Solidworks-MCP-Server"
-Issues = "https://github.com/HarrierPigeon/Solidworks-MCP-Server/issues"
+Homepage = "https://github.com/LC9999216/Solidworks-MCP-Server"
+Issues = "https://github.com/LC9999216/Solidworks-MCP-Server/issues"
 
 [tool.setuptools]
 # `server` as a top-level module keeps `from server import SolidWorksMCPServer`

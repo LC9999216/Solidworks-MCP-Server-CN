@@ -260,19 +260,132 @@ class StateQueryTools:
     def _get_sketch_entities(self, args: dict) -> str:
         sketch_id = args["sketchId"]
         entities = self.tracker.get_sketch_entities(sketch_id)
-        if not entities:
-            return _json_result(f"No entities found in sketch: {sketch_id}")
+        if entities:
+            entity_list = []
+            for e in entities:
+                entity_list.append({
+                    "id": e.entity_id,
+                    "type": e.entity_type,
+                    "coordinates": e.coordinates,
+                })
 
-        entity_list = []
-        for e in entities:
-            entity_list.append({
-                "id": e.entity_id,
-                "type": e.entity_type,
-                "coordinates": e.coordinates,
+            return json.dumps({
+                "result": f"✓ {len(entities)} entities in {sketch_id}",
+                "source": "tracker",
+                "sketchId": sketch_id,
+                "entities": entity_list,
+                "unsupportedCount": sum(e.entity_type == "unsupported" for e in entities),
             })
 
-        return json.dumps({
-            "result": f"✓ {len(entities)} entities in {sketch_id}",
-            "sketchId": sketch_id,
-            "entities": entity_list,
-        })
+        sketch_name = sketch_id.partition(":")[2] if ":" in sketch_id else sketch_id
+        if not self.connection:
+            return _json_result(
+                f"No active SolidWorks document for sketch: {sketch_name}",
+                source="live_com", sketchId=sketch_id,
+                error={"code": "NO_CONNECTION"},
+            )
+        try:
+            if not self.connection.is_alive():
+                return _json_result(
+                    f"No active SolidWorks document for sketch: {sketch_name}",
+                    source="live_com", sketchId=sketch_id,
+                    error={"code": "NO_ACTIVE_DOCUMENT"},
+                )
+            doc = self.connection.get_active_doc()
+            if not doc:
+                return _json_result(
+                    f"No active SolidWorks document for sketch: {sketch_name}",
+                    source="live_com", sketchId=sketch_id,
+                    error={"code": "NO_ACTIVE_DOCUMENT"},
+                )
+            feature = doc.FeatureByName(sketch_name)
+            if not feature:
+                return _json_result(
+                    f"Sketch not found: {sketch_name}", source="live_com",
+                    documentPath=self._document_path(doc), sketchId=sketch_id,
+                    error={"code": "SKETCH_NOT_FOUND"},
+                )
+            sketch = _prop(feature, "GetSpecificFeature2")
+            segments = _prop(sketch, "GetSketchSegments") or []
+            live_entities = []
+            unsupported_count = 0
+            for index, segment in enumerate(list(segments)):
+                item = self._serialize_live_segment(segment, sketch_name, index)
+                if item["type"] == "unsupported":
+                    unsupported_count += 1
+                live_entities.append(item)
+            if not live_entities:
+                return _json_result(
+                    f"Sketch contains no readable entities: {sketch_name}",
+                    source="live_com", documentPath=self._document_path(doc),
+                    sketchId=f"sketch:{sketch_name}", entities=[], unsupportedCount=0,
+                    error={"code": "NO_SKETCH_ENTITIES"},
+                )
+            return json.dumps({
+                "result": f"✓ {len(live_entities)} live entities in {sketch_name}",
+                "source": "live_com",
+                "documentPath": self._document_path(doc),
+                "sketchId": f"sketch:{sketch_name}",
+                "entities": live_entities,
+                "unsupportedCount": unsupported_count,
+            })
+        except Exception as error:
+            logger.debug("live sketch entity query failed: %s", error)
+            return _json_result(
+                f"Unable to read live sketch entities: {sketch_name}",
+                source="live_com", sketchId=f"sketch:{sketch_name}",
+                error={"code": "LIVE_COM_READ_FAILED", "message": str(error)},
+            )
+
+    @staticmethod
+    def _document_path(doc):
+        try:
+            return str(_prop(doc, "GetPathName") or _prop(doc, "GetTitle"))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _point_mm(point):
+        return {
+            "x": float(_prop(point, "X")) * 1000.0,
+            "y": float(_prop(point, "Y")) * 1000.0,
+        }
+
+    def _serialize_live_segment(self, segment, sketch_name, index):
+        entity_id = f"entity:{sketch_name}/{index}"
+        try:
+            kind = int(_prop(segment, "GetType"))
+            if kind == 0:
+                return {
+                    "id": entity_id, "type": "line",
+                    "coordinates": {
+                        "p1": self._point_mm(_prop(segment, "GetStartPoint2")),
+                        "p2": self._point_mm(_prop(segment, "GetEndPoint2")),
+                    },
+                }
+            if kind == 1:
+                center = self._point_mm(_prop(segment, "GetCenterPoint2"))
+                radius = float(_prop(segment, "GetRadius")) * 1000.0
+                if bool(_prop(segment, "IsCircle")):
+                    return {
+                        "id": entity_id, "type": "circle",
+                        "coordinates": {"center": center, "radius": radius},
+                    }
+                return {
+                    "id": entity_id, "type": "arc",
+                    "coordinates": {
+                        "center": center, "radius": radius,
+                        "p1": self._point_mm(_prop(segment, "GetStartPoint2")),
+                        "p2": self._point_mm(_prop(segment, "GetEndPoint2")),
+                        "length": float(_prop(segment, "GetLength")) * 1000.0,
+                    },
+                }
+            return {
+                "id": entity_id, "type": "unsupported",
+                "coordinates": {"swType": kind},
+            }
+        except Exception as error:
+            return {
+                "id": entity_id, "type": "unsupported",
+                "coordinates": {"error": str(error)},
+            }

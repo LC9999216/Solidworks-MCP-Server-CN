@@ -1,11 +1,14 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.egg-info/
 .venv/
 venv/
 build/
 dist/
+
+# Local environment variables
+.env
 
 # Runtime output
 *.log
