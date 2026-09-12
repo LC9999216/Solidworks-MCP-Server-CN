@@ -1,373 +1,245 @@
-# SolidWorks MCP Server 中文适配版
+# 🧩 SolidWorks MCP Server 中文适配版
 
-本项目基于 [HarrierPigeon/Solidworks-MCP-Server](https://github.com/HarrierPigeon/Solidworks-MCP-Server) 修改并保留 MIT 许可证。
+让 Claude、Codex、ChatGPT Desktop 等 AI 编码助手通过 MCP 直接调用 SolidWorks，完成草图、三维特征、装配、检查与导出。🤖📐
 
-## 中文版适配
+本项目基于 [HarrierPigeon/Solidworks-MCP-Server](https://github.com/HarrierPigeon/Solidworks-MCP-Server) 修改，保留原项目的 MIT 许可证。
 
-- 标准基准面可识别英文和中文名称，并在名称不可用时按特征树顺序回退识别。
-- 创建草图尺寸时通过 SolidWorks API 临时关闭尺寸输入对话框，避免依赖英文界面的 `Modify` 窗口；操作结束后恢复原有用户设置。
-- 重新打开零件后，可直接通过 SolidWorks COM 读取草图中的直线、圆和圆弧，不依赖当前 MCP 会话中的缓存。
-- 已在中文版 SolidWorks 2024 上验证草图尺寸创建、原生零件重新打开和草图实体读取。
+## ✨ 中文版适配
 
-当前安装请使用下方“手动安装”；原项目的一键安装脚本仍指向上游发布包。
+- ✅ 识别英文和中文标准基准面名称；名称不可用时，按特征树顺序回退识别。
+- ✅ 创建草图尺寸时通过 SolidWorks API 临时关闭尺寸输入对话框，不依赖英文界面的 `Modify` 窗口；结束后恢复原有设置。
+- ✅ 重新打开零件后，可经 SolidWorks COM 直接读取草图内的直线、圆和圆弧，不依赖 MCP 会话缓存。
+- ✅ 已在中文版 SolidWorks 2024 验证草图尺寸创建、原生零件重新打开和草图实体读取。
 
-Control SolidWorks with plain language. This [Model Context Protocol](https://modelcontextprotocol.io/) server connects AI clients such as Claude and Codex to SolidWorks, so you can describe a part — *"a 60mm mounting bracket with four M5 clearance holes and 3mm fillets"* — and watch it get built, feature by feature, in a real SolidWorks session.
+## 🚀 快速使用
 
-This is, as far as I can tell, the most complete MCP server for SolidWorks available, and I will be expanding as time allows.
+把下面这段说明交给其他编码 Agent，它就能下载本仓库、注册 `solidworks` MCP，并通过该 MCP 操作本机 SolidWorks。🤝
 
-The connected AI client gets a broad tool set covering sketching, solid features, assemblies with mates, configurations, equations, neutral-format import/export, and — critically — *feedback*: it can query faces and edges, check mass properties, detect interference, and take labeled screenshots of the model to see what it's actually building.
+> 在 Windows 上克隆 `https://github.com/LC9999216/Solidworks-MCP-Server.git`，安装 `requirements.txt`，再运行 `codex mcp add solidworks -- C:\\path\\to\\Solidworks-MCP-Server\\.venv\\Scripts\\python.exe C:\\path\\to\\Solidworks-MCP-Server\\server.py`。启动 SolidWorks 后，即可使用 `solidworks_*` 工具创建和编辑三维模型。
 
-## What it can do
+### 手动安装 🛠️
 
-- **Full sketching** — lines, arcs, splines, slots, polygons, text, whole chained profiles in one call, plus driving dimensions and geometric constraints
-- **Solid features** — extrude, revolve, sweep, loft, boundary; the matching cuts; fillet, chamfer, shell, draft, rib, wrap; linear/circular patterns and mirror
-- **Assemblies** — insert saved parts, position them with mates (coincident, concentric, distance, angle, gears...), check interference
-- **Parametrics** — named configurations, per-configuration dimensions, and equations that re-solve when driving dimensions change
-- **Model awareness** — Claude can enumerate faces/edges with exact coordinates, find a face by description ("the angled face"), read mass properties against any coordinate system, and look at labeled screenshots of the model mid-build
-- **Import and export** — open STEP / IGES / Parasolid / ACIS / STL files, optionally running feature recognition to rebuild a parametric tree from an imported solid; export to the same formats by giving `save_document` a neutral extension
-- **A readable design tree** — read the timeline as structured data, rename features and sketches to say what they're *for*, and group them into folders, so the model a human opens is one they can follow
-- **State tracking** — every feature, sketch, and entity gets a stable ID, scoped per document, so multi-part + assembly sessions stay coherent
+前置条件：
 
-## What it can't do
-
-- **Taste** - Claude does *not* replace design reviews, or having a sense for how things should be done.
-- **Interpreting drawings** - Most AI Agents have a hard time interpreting complex or degraded drawings.
-
-## Requirements
-
-- **Windows** (SolidWorks only runs on Windows)
-- **SolidWorks 2022 or later**, installed and activated (tested on SolidWorks 2025)
-- **Claude Desktop, Codex, or the ChatGPT desktop app** (other local MCP clients may also work with manual configuration)
-
-That's it — the installer below takes care of Python and everything else.
-
-## Installation
-
-### Easy install (recommended)
-
-Open **PowerShell** (press `Win`, type "PowerShell", press Enter) and paste:
+- Windows 10/11 🪟
+- 已安装并激活 SolidWorks 2022 或更高版本
+- Python 3.10+ 🐍
+- Git（或下载 ZIP）
+- Codex、Claude Desktop 或 ChatGPT Desktop 🤖
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/HarrierPigeon/Solidworks-MCP-Server/main/scripts/install.ps1 | iex"
-```
-
-The script installs [uv](https://docs.astral.sh/uv/) (which provides Python — you don't need Python installed), downloads the latest release, and sets up an isolated environment under `%LOCALAPPDATA%\SolidWorksMCP`. It auto-detects Claude Desktop and Codex/ChatGPT desktop and registers the server with each confidently detected client.
-
-To choose explicitly, download the script and run one of:
-
-```powershell
-.\install.ps1 -Client Claude
-.\install.ps1 -Client Codex
-.\install.ps1 -Client Both
-```
-
-Valid selections are `Auto` (the default), `Claude`, `Codex`, and `Both`. “Codex” covers the local Codex clients and ChatGPT desktop MCP configuration; it does not enable the hosted ChatGPT web app.
-
-Then restart the configured client completely and ask it to *"create a 50mm cube in SolidWorks"*.
-
-**To update later:** re-run the same one-liner.
-
-**To uninstall:** delete `%LOCALAPPDATA%\SolidWorksMCP`, remove the `"solidworks"` entry from `%APPDATA%\Claude\claude_desktop_config.json` if configured, and run `codex mcp remove solidworks` if configured for Codex.
-
-### Manual install (for developers)
-
-Prerequisites (in addition to the requirements above):
-
-- **[Python](https://www.python.org/downloads/) 3.10 or later** — check "Add python.exe to PATH" during install
-- **[Git](https://git-scm.com/downloads/win)** (or download the repo as a ZIP from GitHub instead)
-
-```powershell
-git clone https://github.com/HarrierPigeon/Solidworks-MCP-Server.git
+git clone https://github.com/LC9999216/Solidworks-MCP-Server.git
 cd Solidworks-MCP-Server
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-(Or `pip install -e .` for an editable package install.)
+### 注册到 Codex / ChatGPT Desktop ⚙️
 
-> Tip: clone somewhere that isn't a network drive.
+```powershell
+codex mcp add solidworks -- C:\path\to\Solidworks-MCP-Server\.venv\Scripts\python.exe C:\path\to\Solidworks-MCP-Server\server.py
+```
 
-For Claude Desktop, register the server in `%APPDATA%\Claude\claude_desktop_config.json` (Claude Desktop → Settings → Developer → Edit Config):
+随后完全重启客户端，先启动 SolidWorks，再让 Agent 执行：
+
+```text
+在 SolidWorks 中创建一个 50 mm 立方体，并返回等轴测视图截图。
+```
+
+### 注册到 Claude Desktop ⚙️
+
+在 `%APPDATA%\Claude\claude_desktop_config.json` 中加入：
 
 ```json
 {
   "mcpServers": {
     "solidworks": {
-      "command": "python",
+      "command": "C:\\path\\to\\Solidworks-MCP-Server\\.venv\\Scripts\\python.exe",
       "args": ["C:\\path\\to\\Solidworks-MCP-Server\\server.py"]
     }
   }
 }
 ```
 
-For Codex and ChatGPT desktop, register it with:
+> 💡 如果 SolidWorks 以管理员身份运行，Claude 或 Codex 也必须以管理员身份运行；COM 无法跨越权限边界。
+
+## 🧰 能做什么？
+
+| 类别 | 能力 |
+|---|---|
+| ✏️ 草图 | 直线、圆、圆弧、样条、椭圆、多边形、槽、文字、尺寸、几何约束、偏移和圆角 |
+| 🧱 三维特征 | 拉伸、切除、旋转、扫描、放样、边界、圆角、倒角、抽壳、拔模、筋和包覆 |
+| 🔁 阵列与孔 | 线性阵列、圆周阵列、镜像、孔向导和装饰螺纹 |
+| 📐 参数化 | 尺寸参数、方程式、配置和配置专属尺寸 |
+| 🔍 模型检查 | 面、边、顶点、包围盒、质量属性、模型截图和状态查询 |
+| 🗂️ 文档与导出 | 保存、打开、STEP / IGES / Parasolid / ACIS / STL 导入与导出、PNG 视图 |
+| 🧩 装配 | 插入零件、配合、干涉检查、组件管理和装配质量属性 |
+| 🌳 特征树 | 查询、重命名、分组和整理特征树 |
+
+## 🧪 给 Agent 的提示示例
+
+提供明确尺寸会得到更可靠的结果。📏
+
+```text
+创建一个 100 mm × 60 mm × 6 mm 的底板，四角各开一个直径 6 mm 的通孔。
+```
+
+```text
+建立一个 L 形支架：底板 80 × 50 × 6 mm，长边处拉伸 40 mm 高的竖板；连接处倒 R5，底板开四个 Ø6 通孔。
+```
+
+```text
+创建一个两零件装配：一块带 Ø20 孔的板和一根 Ø20 销轴；保存零件后，将销轴与孔做同心配合。
+```
+
+```text
+请读取当前零件的质量属性、特征树和等轴测视图，检查是否只有一个实体且没有明显错误。
+```
+
+## 🧩 MCP 工具速览
+
+所有工具均以 `solidworks_` 开头；长度单位是 **毫米**，角度单位是 **度**。内部会自动转换为 SolidWorks COM API 所需的米和弧度。
+
+<details>
+<summary><strong>✏️ 草图</strong></summary>
+
+| 工具 | 作用 |
+|---|---|
+| `create_sketch` / `exit_sketch` | 在基准面或实体面上创建、退出草图 |
+| `sketch_line` / `sketch_centerline` / `sketch_arc` | 直线、中心线和圆弧 |
+| `sketch_rectangle` / `sketch_circle` / `sketch_ellipse` | 矩形、圆和椭圆 |
+| `sketch_spline` / `sketch_polygon` / `sketch_slot` | 样条、多边形和直槽 |
+| `sketch_profile` | 一次创建连续封闭轮廓，支持直线和圆弧 |
+| `sketch_point` / `sketch_text` | 参考点和草图文字 |
+| `sketch_fillet` / `sketch_offset` | 草图圆角和偏移 |
+| `sketch_dimension` / `set_dimension_value` | 新建和修改驱动尺寸 |
+| `sketch_constraint` / `sketch_toggle_construction` | 几何约束与构造几何 |
+</details>
+
+<details>
+<summary><strong>🧱 零件与特征</strong></summary>
+
+| 工具 | 作用 |
+|---|---|
+| `new_part` / `create_extrusion` / `create_cut_extrusion` | 新建零件、拉伸和切除拉伸 |
+| `revolve` / `cut_revolve` | 旋转与旋转切除 |
+| `sweep` / `cut_sweep` | 扫描与扫描切除 |
+| `loft` / `cut_loft` / `boundary_boss` / `boundary_cut` | 放样和边界特征 |
+| `fillet` / `chamfer` / `shell` / `draft` / `rib` / `wrap` | 圆角、倒角、抽壳、拔模、筋和包覆 |
+| `combine_bodies` / `intersect` | 多实体布尔运算 |
+| `set_material` / `get_mass_properties` | 材料与质量属性 |
+| `set_parameter` / `list_parameters` | 参数化尺寸读取和修改 |
+| `suppress_feature` / `delete_feature` / `list_features` | 特征管理 |
+</details>
+
+<details>
+<summary><strong>🔁 阵列、孔和基准</strong></summary>
+
+| 工具 | 作用 |
+|---|---|
+| `linear_pattern` / `circular_pattern` / `mirror` | 线性阵列、圆周阵列和镜像 |
+| `hole_wizard` / `thread` | 孔向导与装饰螺纹 |
+| `ref_plane` / `ref_axis` / `ref_point` | 基准面、基准轴和基准点 |
+| `coordinate_system` | 创建坐标系 |
+</details>
+
+<details>
+<summary><strong>🔍 模型查看与状态</strong></summary>
+
+| 工具 | 作用 |
+|---|---|
+| `get_body_info` / `get_faces` / `get_edges` / `get_vertices` | 读取实体、面、边和顶点信息 |
+| `get_face_edges` / `find_face` | 通过坐标或描述定位面与边 |
+| `look_at_model` / `capture_views` | 对话内截图和导出标准视图 PNG |
+| `get_state` / `get_entity` / `get_sketch_entities` | 查询会话、实体和草图数据 |
+</details>
+
+<details>
+<summary><strong>🗂️ 文档、装配与设计树</strong></summary>
+
+| 工具 | 作用 |
+|---|---|
+| `save_document` / `open_document` / `activate_document` / `close_document` / `list_documents` | 文档保存和多文档管理 |
+| `import_file` / `recognize_features` | 中性格式导入和 FeatureWorks 特征识别 |
+| `new_assembly` / `insert_component` | 新建装配和插入零件 |
+| `add_mate` / `edit_mate` / `check_interference` | 配合编辑与干涉检查 |
+| `suppress_component` / `list_components` / `list_mates` | 装配组件与配合管理 |
+| `get_feature_tree` / `rename_feature` / `create_feature_folder` / `move_to_folder` | 特征树查询、命名和分组 |
+</details>
+
+<details>
+<summary><strong>⚙️ 配置、方程与批处理</strong></summary>
+
+| 工具 | 作用 |
+|---|---|
+| `add_configuration` / `switch_configuration` / `list_configurations` | 配置管理 |
+| `set_config_parameter` | 配置专属尺寸 |
+| `add_equation` / `list_equations` / `delete_equation` | 尺寸方程式 |
+| `batch` | 单次执行最多 25 个彼此独立的 MCP 调用 |
+</details>
+
+## 🔗 工作原理
+
+```text
+编码 Agent  →  MCP 调用  →  server.py  →  solidworks/ 模块  →  SolidWorks COM API
+```
+
+- 服务器通过 `pywin32` 连接已启动的 SolidWorks，必要时可启动新实例。
+- 每个创建对象都有稳定 ID，例如 `feat:Boss-Extrude1`、`sketch:Sketch1`、`comp:bracket-1`，方便 Agent 跨多零件和装配持续引用。
+- 工具返回结构化 JSON；几何查询返回的坐标可直接用于圆角、草图和选择类工具。
+
+## 🩺 常见问题
+
+### Agent 无法连接 SolidWorks
+
+- 确认 SolidWorks 已安装并激活；建议先启动 SolidWorks，再启动编码客户端。
+- 若 SolidWorks 以管理员身份运行，客户端也须以管理员身份运行。
+
+### MCP 没有出现在客户端中
+
+- 完全退出并重启 Claude、Codex 或 ChatGPT Desktop。
+- 检查注册命令中的 Python 路径和 `server.py` 路径。
+- Claude Desktop 请检查 `%APPDATA%\Claude\claude_desktop_config.json` 是否为合法 JSON。
+
+### 提示找不到零件模板
+
+默认从 `C:\ProgramData\SOLIDWORKS\SOLIDWORKS <year>\templates\` 查找模板。若模板在其他位置，请调整 `solidworks/connection.py` 中的查找路径。
+
+### 孔向导卡住或报错
+
+部分环境会弹出阻塞式对话框。可让 Agent 改用“草图圆 + 切除拉伸”创建孔。🕳️
+
+### 其他问题
+
+检查 `server.py` 同目录下的 `solidworks_mcp.log`，并在本仓库提交 Issue。🐛
+
+## 👩‍💻 开发与测试
 
 ```powershell
-codex mcp add solidworks -- python C:\path\to\Solidworks-MCP-Server\server.py
+python test.py            # 完整测试，需要正在运行的 SolidWorks
+python test.py --list     # 查看可运行测试
+python dev_server.py      # 热重载开发服务器，需要 watchdog
+python clean.py           # 关闭打开的 SolidWorks 文档
+python -m unittest tests.test_state_query_live_sketch -v
 ```
 
-Restart the configured client and you're set. (Microsoft Store installs of Claude Desktop keep its config under `%LOCALAPPDATA%\Packages\Claude...\LocalCache\Roaming\Claude` instead.)
+COM 层没有完整模拟器，部分测试会驱动真实 SolidWorks。`tests/agent_capability_tests.md` 还提供了可直接交给 Agent 的端到端提示词。
 
-## Try it
+欢迎提交 Issue 和 PR！🌟
 
-The die below was modeled entirely by Claude from this single prompt — and its correctness is checkable: opposite faces sum to 7, and the volume reported by mass properties matches the analytic value for a filleted cube minus 21 pips to five significant figures.
+## ⚠️ 已知限制
 
-```
-Make a simple dice: 16mm cube, 2mm fillets on all edges, then put the correct
-pip pattern (1 through 6) on each face using shallow 2.5mm-diameter cut
-circles. Opposite faces must sum to 7. Show me screenshots of three different
-views when done so I can check your work.
-```
+- 尚未实现二维工程图自动生成。
+- `hole_wizard` 在部分安装环境可能触发阻塞对话框。
+- 设计树文件夹不能嵌套；将特征加入文件夹通常需要在创建文件夹时一次性指定完整特征列表。
+- `recognize_features` 只能部分恢复导入模型的参数化特征树，适合作为起点，不能代替完整重建。
+- 尚未实现 WIDTH 配合，也未集成 PDM、PDM Pro 或 3DExperience。
 
-![A die modeled in SolidWorks by Claude — 16mm cube, filleted edges, correct pip pattern](assets/dice-demo.png)
-
-More prompts to get a feel for it:
-
-```
-Create a 100mm cube in SolidWorks.
-```
-
-```
-Make a bracket: 80x50x6mm base plate with a 40mm tall vertical wall along one
-long edge, 5mm fillets where they meet, and four 6mm through-holes in the base.
-```
-
-```
-Model a simple bolt: M10-ish — 10mm shank, 30mm long, hex head. Then show me
-an isometric screenshot.
-```
-
-```
-Build a two-part assembly: a plate with a 20mm hole and a 20mm pin, saved as
-separate parts, then mate the pin concentric into the hole.
-```
-
-Claude works best when you give real dimensions, but it will make sensible choices if you don't. It can also read what it built (`get_faces`, `get_mass_properties`, `look_at_model`) and fix its own mistakes.
-
-## The tools
-
-Every tool is prefixed `solidworks_` (e.g. `solidworks_sketch_circle`). Dimensions are **millimeters**, angles are **degrees** — conversion to the COM API's meters/radians happens internally.
-
-<details>
-<summary><strong>Sketching</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `create_sketch` | Open a sketch on Front/Top/Right, a reference plane, or a model face (by coordinates) |
-| `exit_sketch` | Close the active sketch |
-| `sketch_rectangle` | Rectangle — absolute, relative-to-last-shape, spacing, or corner-defined positioning |
-| `sketch_circle` | Circle — absolute or relative positioning |
-| `sketch_profile` | Whole chained profile (lines / tangent arcs / arcs) in one call, optional auto-close + corner fillets |
-| `sketch_line` / `sketch_centerline` | Line segments; centerlines double as revolve/mirror axes |
-| `sketch_arc` | Arc — 3-point or center-point |
-| `sketch_spline` | Spline through points |
-| `sketch_ellipse` | Ellipse with optional rotation |
-| `sketch_polygon` | Regular polygon (inscribed/circumscribed) |
-| `sketch_slot` | Straight slot from two centers + width |
-| `sketch_point` / `sketch_text` | Reference points and sketch text |
-| `sketch_fillet` | Round a sketch corner with an exact tangent arc |
-| `sketch_offset` | Offset existing geometry (chains supported) — hollow profiles, wall thickness |
-| `sketch_dimension` | Add a driving dimension (length/radius/between), optionally setting the value |
-| `set_dimension_value` | Change an existing dimension |
-| `sketch_constraint` | Geometric relations: horizontal, vertical, coincident, tangent, equal, ... |
-| `sketch_toggle_construction` | Toggle construction geometry |
-| `get_last_shape_info` | Center/edges/size of the last drawn shape (for relative positioning) |
-
-</details>
-
-<details>
-<summary><strong>Modeling</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `new_part` | New blank part document |
-| `create_extrusion` | Extrude the sketch (BLIND or THROUGH_ALL; `merge:false` for multi-body work) |
-| `create_cut_extrusion` | Cut-extrude (auto-flips direction into the body when needed) |
-| `combine_bodies` | Boolean ADD / SUBTRACT / COMMON on a multi-body part |
-| `set_material` | Assign a SOLIDWORKS material (needed for real mass numbers) |
-| `set_parameter` | Set any dimension by name (`D1@Boss-Extrude1`) — parametric edits |
-| `list_parameters` | Every driving dimension with its addressable name, value, and owning feature |
-| `suppress_feature` / `delete_feature` | Suppress or remove features |
-| `get_mass_properties` | Mass, volume, surface area, center of mass (optionally vs. a coordinate system) |
-| `list_features` | The feature tree |
-
-</details>
-
-<details>
-<summary><strong>Features — boss & cut</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `revolve` / `cut_revolve` | Revolve the sketch about its centerline |
-| `sweep` / `cut_sweep` | Sweep a profile sketch along a path sketch |
-| `loft` / `cut_loft` | Loft between 2+ profiles on different planes |
-| `boundary_boss` / `boundary_cut` | Boundary features with optional guide curves |
-
-</details>
-
-<details>
-<summary><strong>Applied features</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `fillet` | Round edges — pick by coordinates or fillet every edge of a named feature |
-| `chamfer` | Bevel edges (distance, angle, or two-distance) — by coordinates or every edge of a named feature |
-| `shell` | Hollow the part, removing chosen faces |
-| `draft` | Draft faces against a neutral plane |
-| `rib` | Rib from an open sketch profile |
-| `wrap` | Emboss / deboss / scribe a sketch onto a face |
-| `intersect` | Keep the common volume of overlapping bodies |
-
-</details>
-
-<details>
-<summary><strong>Patterns & holes</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `linear_pattern` | 1- or 2-direction linear pattern — direction by model axis (`X`/`Y`/`Z`) or edge point |
-| `circular_pattern` | Pattern around an axis |
-| `mirror` | Mirror features across a plane or planar face |
-| `hole_wizard` | Hole Wizard holes (counterbore/countersink/tapped) — see caveat in Troubleshooting |
-| `thread` | Cosmetic thread on a circular edge |
-
-</details>
-
-<details>
-<summary><strong>Reference geometry</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `ref_plane` | Offset / angled / through-point reference planes |
-| `ref_axis` | Axis from two points, a cylindrical face, or an edge |
-| `ref_point` | Point at coordinates, arc center, face center, or on an edge |
-| `coordinate_system` | Coordinate system at an origin with optional axis edges |
-
-</details>
-
-<details>
-<summary><strong>Seeing the model</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `get_body_info` | Bounding box + face/edge/vertex counts |
-| `get_faces` | Every face: type, area, normal, sample point, and the feature that created it |
-| `get_edges` | Every edge: type, endpoints, midpoint, length, adjacent features — filter by type or feature |
-| `get_face_edges` | One face (by coordinate) and its bounding edges |
-| `get_vertices` | All vertex coordinates |
-| `find_face` | Select a face by *description*: orientation, creating feature, surface type, area rank |
-| `look_at_model` | Screenshot returned straight into the conversation, with face labels matching `get_faces` |
-| `get_state` | Tracked session state + live model context (bounding box, sketch status, config, docs) |
-| `get_entity` / `get_sketch_entities` | Drill into any tracked object or sketch |
-
-</details>
-
-<details>
-<summary><strong>Documents & assemblies</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `save_document` | True Save As (bare filenames land in `workspace/`) — or **export** by giving a neutral extension (`.STEP`, `.IGS`, `.X_T`, `.SAT`, `.STL`), which leaves the SolidWorks document open and unchanged |
-| `open_document` / `activate_document` / `close_document` / `list_documents` | Multi-document sessions; neutral CAD files route to the importer automatically |
-| `import_file` | Import STEP / IGES / Parasolid / ACIS / STL as a part, optionally running feature recognition |
-| `recognize_features` | Rebuild a parametric feature tree from an imported solid (FeatureWorks) so its dimensions can be driven |
-| `capture_views` | Export standard-view PNGs (isometric, front, top, ...) to disk |
-| `new_assembly` | New assembly document |
-| `insert_component` | Insert a saved part (first component is auto-fixed) |
-| `add_mate` | COINCIDENT, CONCENTRIC, PARALLEL, PERPENDICULAR, TANGENT, DISTANCE, ANGLE, LOCK, GEAR |
-| `edit_mate` | Change a distance/angle mate and get updated positions |
-| `check_interference` | Overlap volumes + the components involved |
-| `suppress_component` / `list_components` / `list_mates` | Assembly management |
-| `get_assembly_mass_properties` | Assembly mass properties |
-
-</details>
-
-<details>
-<summary><strong>Design tree</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `get_feature_tree` | The timeline as structured data: build order, type, tracked ID, suppression, folder contents, and absorbed sub-features |
-| `rename_feature` | Give a feature, sketch or plane a meaningful name — tracked IDs follow the rename |
-| `create_feature_folder` | Group features into a named folder |
-| `move_to_folder` | Move features into an existing folder (see Known limitations) |
-
-</details>
-
-<details>
-<summary><strong>Configurations & equations</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `add_configuration` / `switch_configuration` / `list_configurations` | Named design variants |
-| `set_config_parameter` | Set a dimension in one configuration only |
-| `add_equation` / `list_equations` / `delete_equation` | Dimension equations that re-solve automatically |
-
-</details>
-
-<details>
-<summary><strong>Batching</strong></summary>
-
-| Tool | Description |
-|---|---|
-| `batch` | Run up to 25 independent tool calls in a single request (tested for multi-entity sketching) |
-
-</details>
-
-## How it works
-
-```
-Claude  →  MCP tool call  →  server.py dispatch  →  solidworks/ module  →  SolidWorks COM API
-```
-
-- The server connects to a running SolidWorks instance (or launches one) via COM (`pywin32`).
-- Every created object gets a **stable ID** (`feat:Boss-Extrude1`, `sketch:Sketch1`, `comp:bracket-1`) tracked per document, so Claude can refer back to things it built — even across multiple parts and an assembly in one session.
-- Tools return structured JSON, and geometry-query tools return coordinates that can be fed directly into selection-based tools (fillet this edge, sketch on that face).
-
-## Troubleshooting
-
-**Claude says it can't connect to SolidWorks**
-- Make sure SolidWorks is installed and activated; launching SolidWorks *before* Claude Desktop is the most reliable order.
-- If SolidWorks runs elevated, run Claude Desktop as Administrator too (COM won't cross the elevation boundary).
-
-**The server doesn't show up in Claude Desktop**
-- Restart Claude Desktop fully: File → Exit (not just closing the window), then reopen.
-- Check the config file for JSON typos: `%APPDATA%\Claude\claude_desktop_config.json` (Microsoft Store installs: `%LOCALAPPDATA%\Packages\Claude...\LocalCache\Roaming\Claude\`).
-
-**"No Part template found"**
-- Templates are auto-discovered at `C:\ProgramData\SOLIDWORKS\SOLIDWORKS <year>\templates\`. If yours live elsewhere, adjust the glob in `solidworks/connection.py`.
-
-**Hole Wizard hangs or errors**
-- `hole_wizard` can trigger a blocking SolidWorks dialog on some setups. The reliable fallback is a sketched circle + cut-extrude, which Claude will use if you ask.
-
-**Anything else**
-- Check `solidworks_mcp.log` next to `server.py` (easy install: `%LOCALAPPDATA%\SolidWorksMCP\app\`), then [open an issue](https://github.com/HarrierPigeon/Solidworks-MCP-Server/issues) with the relevant lines.
-
-## Development
-
-```powershell
-python test.py            # full test suite (needs a live SolidWorks)
-python test.py --list     # list tests; --category / --test / --gui to filter
-python dev_server.py      # hot-reload dev server (pip install watchdog)
-python clean.py           # close all open SolidWorks documents
-```
-
-There is no mock of the COM layer — tests drive a real SolidWorks instance. `tests/agent_capability_tests.md` additionally contains 46 copy-paste prompts for end-to-end testing through Claude itself. Architecture notes live in [CLAUDE.md](CLAUDE.md).
-
-Contributions welcome — please open an issue or PR.
-
-## Known limitations
-
-- Drawing (2D drafting) generation isn't implemented yet.
-- `hole_wizard` may trigger a blocking dialog (see Troubleshooting).
-- Design-tree folders are **flat**, and a folder's membership has to be decided when you create it: SolidWorks rejects `MoveToFolder` for moving features into an existing folder, and folders can't be nested. `create_feature_folder` with the full feature list is the path that works.
-- `recognize_features` recovers a *partial* tree. On real mechanical parts it typically reconstructs holes, fillets and chamfers around a structural core it can't decompose, leaving the remainder in an `Imported<n>` body — so treat it as a head start, not a full parametric rebuild. It also needs SOLIDWORKS Professional or Premium.
-- WIDTH mates aren't implemented; component positioning is mate-driven (direct transform setting isn't available via late-bound COM).
-- no PDM / PDM Pro or 3DExperience (Enovia) awareness.  If you have extra PDM Pro licenses, or access to the Enovia API docs, please reach out!
-
-## License
+## 📄 许可证
 
 [MIT](LICENSE)
 
 ---
 
-**Disclaimer:** *This project is not affiliated with or endorsed by Dassault Systèmes SolidWorks Corporation. "SolidWorks" is a registered trademark of Dassault Systèmes. Generated geometry should be reviewed before usage.  May cause happiness or induce wonder.  If your session lasts longer than 3 hours consider drinking water and adjusting your chair.*
+> ⚖️ 本项目与 Dassault Systèmes SolidWorks Corporation 无关联，也未获其认可。SolidWorks 是 Dassault Systèmes 的注册商标。请在制造或正式使用前复核生成的几何模型。🥤 长时间建模请记得喝水并调整坐姿。
