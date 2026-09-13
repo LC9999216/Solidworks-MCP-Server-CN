@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Computer Aided Design (CAD)",
 ]
 dependencies = [
-    "mcp>=1.26.0",
+    "mcp>=1.26.0,<2",
     "pywin32>=311",
     "Pillow>=10.0",  # face-label overlays in look_at_model screenshots
 ]
